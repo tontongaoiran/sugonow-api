@@ -518,7 +518,13 @@ router.post('/login', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('LOGIN ERROR:', err.message);
+    // Full diagnostic logging — show name, message, and stack so the real cause
+    // is visible in the server logs (a bare err.message can be empty for some
+    // error types, e.g. DB driver errors).
+    console.error('LOGIN ERROR name:', err.name);
+    console.error('LOGIN ERROR message:', err.message);
+    console.error('LOGIN ERROR code:', err.code);
+    console.error('LOGIN ERROR stack:', err.stack);
     res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
