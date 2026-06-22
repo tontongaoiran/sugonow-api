@@ -955,11 +955,31 @@ async function renderGrowth(){
         : '<div class="empty">No pending top-ups.</div>');
     } else if(growthSub==='promos'){
       const r=await get('/growth/admin/settings'); const st=r.settings||{};
+      const tg=(label,key,on)=>`<div class="field" style="align-items:center"><label style="flex:1">${label}</label>`+
+        `<button class="btn ${on?'btn-green':''}" onclick="saveGrowthToggle('${key}',${on?'false':'true'})">${on?'ON':'OFF'}</button></div>`;
+      const num=(label,key,id,val)=>`<div class="field"><label>${label}</label><input id="${id}" type="number" value="${val??0}"><button class="btn btn-green" onclick="saveGrowth('${key}','${id}')">Save</button></div>`;
       body.innerHTML = `
-        <div class="field"><label>Earn-credit amount (₱)</label><input id="g-earn" type="number" value="${st.earnCredit??0}"><button class="btn btn-green" onclick="saveGrowth('earn_credit_amount','g-earn')">Save</button></div>
-        <div class="field"><label>Referral amount each side (₱)</label><input id="g-ref" type="number" value="${st.referral??0}"><button class="btn btn-green" onclick="saveGrowth('referral_amount','g-ref')">Save</button></div>
-        <div class="field"><label>Milestone target trips</label><input id="g-mt" type="number" value="${st.milestoneTrips??0}"><button class="btn btn-green" onclick="saveGrowth('milestone_target_trips','g-mt')">Save</button></div>
-        <div class="field"><label>Milestone bonus (₱)</label><input id="g-mb" type="number" value="${st.milestoneBonus??0}"><button class="btn btn-green" onclick="saveGrowth('milestone_bonus','g-mb')">Save</button></div>`;
+        <div class="section">Earn-credit (₱ after 1st booking)</div>
+        ${tg('Earn-credit active','earn_credit_active',st.earnCreditActive)}
+        ${num('Earn-credit amount (₱)','earn_credit_amount','g-earn',st.earnCredit)}
+
+        <div class="section">Referral rewards</div>
+        ${tg('Referral rewards active','referral_active',st.referralActive)}
+        ${num('Referral amount each side (₱)','referral_amount','g-ref',st.referral)}
+
+        <div class="section">Bundle voucher (LPG/water → free food delivery)</div>
+        ${tg('Bundle voucher active','bundle_voucher_active',st.voucherActive)}
+        ${num('Voucher valid for (hours)','bundle_voucher_hours','g-vh',st.voucherHours)}
+
+        <div class="section">Driver wallet (pre-paid commission)</div>
+        ${tg('Driver wallet active','driver_wallet_active',st.driverWalletActive)}
+        ${num('Min driver top-up (₱)','driver_wallet_min_topup','g-mtu',st.driverMinTopup)}
+
+        <div class="section">Driver weekly milestone bonus</div>
+        ${tg('Milestone bonus active','milestone_active',st.milestoneActive)}
+        ${num('Milestone target trips','milestone_target_trips','g-mt',st.milestoneTrips)}
+        ${num('Milestone min rating','milestone_min_rating','g-mr',st.milestoneRating)}
+        ${num('Milestone bonus (₱)','milestone_bonus','g-mb',st.milestoneBonus)}`;
     } else {
       const r=await get('/growth/admin/milestones'); const list=r.drivers||[];
       body.innerHTML = `<div class="note">Drivers who hit ${r.target||'—'} trips at ${r.min_rating||'—'}★ qualify for ₱${r.bonus||0}.</div>`+
@@ -977,6 +997,7 @@ async function renderGrowth(){
 async function topupApprove(id){ try{ await post('/driver-wallet/admin/approve/'+id); toast('Approved'); renderGrowth(); }catch(e){ toast(e.message); } }
 async function topupReject(id){ try{ await post('/driver-wallet/admin/reject/'+id); toast('Rejected'); renderGrowth(); }catch(e){ toast(e.message); } }
 async function saveGrowth(key,inputId){ try{ await post('/growth/admin/settings',{key,value:parseFloat(document.getElementById(inputId).value)}); toast('Saved'); }catch(e){ toast(e.message); } }
+async function saveGrowthToggle(key,value){ try{ await post('/growth/admin/settings',{key,value}); toast(value==='true'?'Turned ON':'Turned OFF'); renderGrowth(); }catch(e){ toast(e.message); } }
 async function payMilestone(id){ if(!confirm('Mark this week\'s bonus as paid (credit to driver wallet)?'))return; try{ await post('/growth/admin/milestones/'+id+'/pay',{method:'wallet'}); toast('Bonus paid'); renderGrowth(); }catch(e){ toast(e.message); } }
 
 // ====================== INSIGHTS ======================
