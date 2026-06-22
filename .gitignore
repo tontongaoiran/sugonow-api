@@ -1,0 +1,22 @@
+# ── SugoNow API — files that must NEVER go to GitHub ──
+
+# Secrets & credentials (CRITICAL — never commit these)
+# Block ALL .env variants, including the .example files (yours contain real
+# DB credentials and an admin mobile number, so they must NOT be shared).
+.env
+.env.*
+*.example
+*firebase-adminsdk*.json
+sugonow-flora-firebase-adminsdk-fbsvc-2f944aa812.json
+
+# Dependencies (re-installed by Railway from package.json)
+node_modules/
+
+# Uploaded files (live on the Railway volume, not in Git)
+uploads/
+
+# Logs & OS junk
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

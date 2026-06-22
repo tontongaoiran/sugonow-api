@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SugoNow Admin</title>
+<style>
+  :root{
+    --dark:#0F6E56; --green:#1D9E75; --gold:#C9A227; --light:#E1F5EE;
+    --bg:#F2F5F4; --card:#fff; --text:#1d2521; --muted:#6b7b74;
+    --line:#e3eae7; --red:#A32D2D; --amber:#BA7517; --blue:#185FA5;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+    background:var(--bg);color:var(--text);font-size:14px}
+  /* ---- Login ---- */
+  #login{position:fixed;inset:0;background:linear-gradient(135deg,#0B5E49,#1D9E75);
+    display:flex;align-items:center;justify-content:center;z-index:100}
+  .login-box{background:#fff;border-radius:18px;padding:38px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+  .login-box h1{font-size:26px;color:var(--dark);margin-bottom:4px}
+  .login-box .sub{color:var(--muted);font-size:13px;margin-bottom:22px}
+  .login-box label{display:block;font-size:11px;font-weight:700;color:var(--muted);
+    letter-spacing:.5px;margin:14px 0 5px}
+  .login-box input{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font-size:15px}
+  .login-box button{width:100%;margin-top:22px;padding:13px;background:var(--green);color:#fff;
+    border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer}
+  .login-box button:hover{background:var(--dark)}
+  .login-err{color:var(--red);font-size:13px;margin-top:12px;min-height:18px}
+  /* ---- Layout ---- */
+  #app{display:none;height:100vh}
+  .shell{display:flex;height:100vh}
+  .sidebar{width:230px;background:var(--dark);color:#fff;flex-shrink:0;display:flex;flex-direction:column;overflow-y:auto}
+  .brand{padding:20px 18px;font-size:20px;font-weight:800;border-bottom:1px solid rgba(255,255,255,.12)}
+  .brand .badge{display:inline-block;width:30px;height:30px;background:#fff;color:var(--dark);
+    border-radius:50%;text-align:center;line-height:30px;font-weight:900;margin-right:8px}
+  .nav{flex:1;padding:10px 0}
+  .nav a{display:flex;align-items:center;gap:11px;padding:12px 18px;color:#CDEBE0;
+    text-decoration:none;font-size:14px;cursor:pointer;border-left:3px solid transparent}
+  .nav a:hover{background:rgba(255,255,255,.06)}
+  .nav a.active{background:rgba(255,255,255,.12);border-left-color:var(--gold);color:#fff;font-weight:700}
+  .nav a .pill{margin-left:auto;background:var(--gold);color:var(--dark);font-size:11px;
+    font-weight:800;border-radius:10px;padding:1px 8px;min-width:20px;text-align:center}
+  .sidebar .foot{padding:14px 18px;border-top:1px solid rgba(255,255,255,.12);font-size:12px;color:#9FC9BB}
+  .logout{color:#fff;cursor:pointer;text-decoration:underline;margin-top:6px;display:inline-block}
+  .main{flex:1;overflow-y:auto;padding:24px 28px}
+  .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+  .topbar h2{font-size:22px;color:var(--dark)}
+  .refresh{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 14px;
+    cursor:pointer;font-size:13px;font-weight:600;color:var(--blue)}
+  /* ---- Cards / tables ---- */
+  .grid{display:grid;gap:14px}
+  .stat-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .stat .num{font-size:30px;font-weight:800;color:var(--dark)}
+  .stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+  .live-grid{grid-template-columns:repeat(3,1fr);margin-bottom:8px}
+  .live{background:#F2FAF7;border:1px solid #D6EFE6;border-radius:14px;padding:16px;text-align:center}
+  .live .num{font-size:32px;font-weight:800}
+  .live .lbl{font-size:12px;color:var(--muted);margin-top:2px}
+  .section{font-size:13px;font-weight:800;color:var(--dark);text-transform:uppercase;
+    letter-spacing:.5px;margin:22px 0 10px}
+  table{width:100%;border-collapse:collapse;background:var(--card);border-radius:12px;overflow:hidden;
+    border:1px solid var(--line)}
+  th{background:var(--green);color:#fff;text-align:left;padding:11px 13px;font-size:12px;font-weight:700}
+  td{padding:11px 13px;border-top:1px solid var(--line);font-size:13.5px}
+  tr:nth-child(even) td{background:#F8FBFA}
+  .btn{border:none;border-radius:8px;padding:7px 13px;font-size:12.5px;font-weight:700;cursor:pointer;margin-right:5px}
+  .btn-green{background:var(--green);color:#fff}
+  .btn-red{background:#FCEBEB;color:var(--red)}
+  .btn-amber{background:#FCEFD6;color:var(--amber)}
+  .btn-blue{background:#E3EFFB;color:var(--blue)}
+  .btn-gold{background:var(--gold);color:#fff}
+  .btn:hover{opacity:.85}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+  .tag{font-size:11px;font-weight:800;border-radius:10px;padding:2px 9px}
+  .tag-on{background:#E7F6EF;color:#0F6E56}
+  .tag-off{background:#FCEBEB;color:var(--red)}
+  .tag-busy{background:#E3EFFB;color:var(--blue)}
+  .tag-gold{background:#F7EFD6;color:#8A6D1B}
+  .empty{color:var(--muted);font-style:italic;padding:24px;text-align:center}
+  .loading{color:var(--muted);padding:24px;text-align:center}
+  .toolbar{display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap}
+  .toolbar input,.toolbar select{padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px}
+  .subtab{display:inline-block;padding:7px 14px;border-radius:18px;background:#fff;border:1px solid var(--line);
+    cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);margin-right:7px}
+  .subtab.active{background:var(--green);color:#fff;border-color:var(--green)}
+  .field{display:flex;gap:8px;align-items:center;margin-bottom:9px}
+  .field label{width:230px;font-size:13px}
+  .field input{padding:8px 10px;border:1px solid var(--line);border-radius:7px;width:110px;text-align:center}
+  .note{font-size:12px;color:var(--muted);font-style:italic;margin:6px 0}
+  .toast{position:fixed;bottom:24px;right:24px;background:var(--dark);color:#fff;padding:13px 20px;
+    border-radius:10px;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:200;opacity:0;
+    transition:opacity .25s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login">
+  <div class="login-box">
+    <h1>SugoNow</h1>
+    <div class="sub">Admin Control Panel</div>
+    <label>MOBILE NUMBER</label>
+    <input id="li-mobile" type="text" placeholder="09XXXXXXXXX" autocomplete="username">
+    <label>PASSWORD</label>
+    <input id="li-pass" type="password" placeholder="Your admin password" autocomplete="current-password">
+    <button onclick="doLogin()">Log in</button>
+    <div class="login-err" id="li-err"></div>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app">
+  <div class="shell">
+    <div class="sidebar">
+      <div class="brand"><span class="badge">S</span>SugoNow</div>
+      <div class="nav" id="nav"></div>
+      <div class="foot">
+        <div id="who"></div>
+        <span class="logout" onclick="logout()">Log out</span>
+      </div>
+    </div>
+    <div class="main">
+      <div class="topbar">
+        <h2 id="page-title">Overview</h2>
+        <button class="refresh" onclick="renderTab(CURRENT)">↻ Refresh</button>
+      </div>
+      <div id="content"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ====================== CONFIG ======================
+// Served from the same origin as the API, so this works automatically.
+const API = location.origin + '/api/v1';
+let TOKEN = sessionStorage.getItem('sn_admin_token') || null;
+let CURRENT = 'overview';
+let liveTimer = null;
+
+const TABS = [
+  ['overview','📊','Overview'],
+  ['approvals','✅','Approvals'],
+  ['drivers','🛺','Drivers'],
+  ['merchants','🏪','Merchants'],
+  ['catalog','📦','Stores & Products'],
+  ['bookings','📋','Bookings'],
+  ['issues','🚨','Issues'],
+  ['money','💰','Fares & Fees'],
+  ['growth','🚀','Growth & Wallets'],
+  ['insights','📈','Insights'],
+  ['users','👥','Users'],
+  ['landmarks','📍','Landmarks'],
+];
+
+// ====================== HELPERS ======================
+const h = (s)=>({Authorization:'Bearer '+TOKEN});
+const peso = (n)=>'₱'+(parseFloat(n||0)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc = (s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2200);}
+async function api(path, opts={}){
+  const r = await fetch(API+path, {...opts, headers:{...h(), 'Content-Type':'application/json', ...(opts.headers||{})}});
+  if(r.status===401||r.status===403){logout();throw new Error('Session expired');}
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.message||('Error '+r.status));
+  return data;
+}
+const get = (p)=>api(p);
+const post = (p,body)=>api(p,{method:'POST',body:JSON.stringify(body||{})});
+const patch = (p,body)=>api(p,{method:'PATCH',body:JSON.stringify(body||{})});
+const del = (p)=>api(p,{method:'DELETE'});
+
+// ====================== LOGIN ======================
+async function doLogin(){
+  const mobile = document.getElementById('li-mobile').value.trim();
+  const password = document.getElementById('li-pass').value;
+  const err = document.getElementById('li-err');
+  err.textContent='';
+  console.log('[admin] login clicked. API base =', API);
+  // Guard: the panel must be opened THROUGH the backend, not as a file://
+  if(location.protocol === 'file:'){
+    err.innerHTML = 'Open this page through your server:<br><b>http://localhost:3000/admin</b><br>(not by double-clicking the file).';
+    return;
+  }
+  if(!mobile||!password){err.textContent='Enter mobile and password.';return;}
+  try{
+    const r = await fetch(API+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mobile,password})});
+    let data={};
+    try{ data = await r.json(); }catch(_){}
+    console.log('[admin] login response', r.status, data);
+    if(!r.ok){err.textContent=data.message||('Login failed (HTTP '+r.status+').');return;}
+    if(data.user && data.user.role!=='admin'){err.textContent='This account is not an admin.';return;}
+    if(!data.token){err.textContent='No token returned — check the account is an admin.';return;}
+    TOKEN = data.token;
+    sessionStorage.setItem('sn_admin_token',TOKEN);
+    sessionStorage.setItem('sn_admin_name',data.user?.full_name||'Admin');
+    startApp();
+  }catch(e){
+    console.error('[admin] login error', e);
+    err.innerHTML = 'Could not reach the server at <b>'+API+'</b>.<br>Make sure the server is running and you opened this at http://localhost:3000/admin';
+  }
+}
+function logout(){
+  TOKEN=null;sessionStorage.removeItem('sn_admin_token');
+  if(liveTimer)clearInterval(liveTimer);
+  document.getElementById('app').style.display='none';
+  document.getElementById('login').style.display='flex';
+}
+function startApp(){
+  document.getElementById('login').style.display='none';
+  document.getElementById('app').style.display='block';
+  document.getElementById('who').textContent = sessionStorage.getItem('sn_admin_name')||'Admin';
+  buildNav();
+  go('overview');
+}
+function buildNav(){
+  const nav=document.getElementById('nav');
+  nav.innerHTML = TABS.map(([k,icon,label])=>
+    `<a id="nav-${k}" onclick="go('${k}')"><span>${icon}</span><span>${esc(label)}</span><span class="pill" id="pill-${k}" style="display:none"></span></a>`
+  ).join('');
+}
+function go(tab){
+  CURRENT=tab;
+  document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
+  document.getElementById('nav-'+tab)?.classList.add('active');
+  document.getElementById('page-title').textContent = (TABS.find(t=>t[0]===tab)||[])[2]||'';
+  if(liveTimer){clearInterval(liveTimer);liveTimer=null;}
+  renderTab(tab);
+}
+function setContent(html){document.getElementById('content').innerHTML=html;}
+
+// ====================== TAB ROUTER ======================
+async function renderTab(tab){
+  setContent('<div class="loading">Loading…</div>');
+  try{
+    if(tab==='overview') return renderOverview();
+    if(tab==='approvals') return renderApprovals();
+    if(tab==='drivers') return renderDrivers();
+    if(tab==='merchants') return renderMerchants();
+    if(tab==='catalog') return renderCatalog();
+    if(tab==='bookings') return renderBookings();
+    if(tab==='issues') return renderIssues();
+    if(tab==='money') return renderMoney();
+    if(tab==='growth') return renderGrowth();
+    if(tab==='insights') return renderInsights();
+    if(tab==='users') return renderUsers();
+    if(tab==='landmarks') return renderLandmarks();
+  }catch(e){ setContent('<div class="empty">'+esc(e.message)+'</div>'); }
+}
+</script>
+
+<script>
+// ====================== OVERVIEW ======================
+async function renderOverview(){
+  const s = await get('/admin/dashboard');
+  let cm=null; try{ cm=await get('/admin/commission-report'); }catch(e){}
+  const live = `
+    <div class="grid live-grid">
+      <div class="live"><div class="num" style="color:var(--green)">${s.drivers_online??0}</div><div class="lbl">Drivers online</div></div>
+      <div class="live"><div class="num" style="color:var(--blue)">${s.bookings_active??0}</div><div class="lbl">Trips in progress</div></div>
+      <div class="live"><div class="num" style="color:var(--amber)">${s.bookings_pending??0}</div><div class="lbl">Searching</div></div>
+    </div>
+    <div class="note">Auto-refreshes every 15s</div>`;
+  const stats = `
+    <div class="grid stat-grid">
+      <div class="stat"><div class="num">${peso(s.today_revenue)}</div><div class="lbl">Today's revenue</div></div>
+      <div class="stat"><div class="num">${s.today_trips??0}</div><div class="lbl">Trips today</div></div>
+      <div class="stat"><div class="num">${peso(s.total_commission)}</div><div class="lbl">Commission today</div></div>
+      <div class="stat"><div class="num">${s.active_drivers??0}</div><div class="lbl">Active drivers</div></div>
+      <div class="stat"><div class="num">${s.total_customers??0}</div><div class="lbl">Customers</div></div>
+      <div class="stat"><div class="num">${s.pending_drivers??0}</div><div class="lbl">Pending driver approvals</div></div>
+      <div class="stat"><div class="num">${s.empty_wallet_drivers??0}</div><div class="lbl">Empty-wallet drivers</div></div>
+      <div class="stat"><div class="num">${s.open_flags??0}</div><div class="lbl">Open fraud flags</div></div>
+    </div>`;
+  const comm = cm ? `
+    <div class="section">💵 SugoNow revenue (commission collected)</div>
+    <div class="note">Driver cut = commission + booking fee taken from completed trips. Merchant = fees you've collected from stores. Full breakdown in Insights.</div>
+    <div class="grid stat-grid">
+      <div class="stat"><div class="num">${peso(cm.total?.month)}</div><div class="lbl">This month — total</div></div>
+      <div class="stat"><div class="num">${peso(cm.driver?.month)}</div><div class="lbl">— from drivers</div></div>
+      <div class="stat"><div class="num">${peso(cm.merchant?.month)}</div><div class="lbl">— from merchants</div></div>
+      <div class="stat"><div class="num" style="color:var(--amber)">${peso(cm.merchant?.outstanding)}</div><div class="lbl">Merchant fees still owed${cm.merchant?.outstanding_stores?` (${cm.merchant.outstanding_stores} stores)`:''}</div></div>
+    </div>` : '';
+  setContent(`<div class="section">🟢 Live right now</div>${live}
+    <div class="section">Today's summary</div>${stats}
+    ${comm}
+    <div class="section">🛵 Online drivers</div><div id="online-drivers"><div class="loading">Loading…</div></div>`);
+  loadOnlineDrivers();
+  liveTimer = setInterval(async ()=>{ if(CURRENT==='overview'){ try{await refreshLive();}catch(e){} } }, 15000);
+}
+async function refreshLive(){
+  const s = await get('/admin/dashboard');
+  const nums = document.querySelectorAll('.live .num');
+  if(nums[0]) nums[0].textContent = s.drivers_online??0;
+  if(nums[1]) nums[1].textContent = s.bookings_active??0;
+  if(nums[2]) nums[2].textContent = s.bookings_pending??0;
+  loadOnlineDrivers();
+}
+async function loadOnlineDrivers(){
+  try{
+    const r = await get('/admin/online-drivers');
+    const list = r.drivers||[];
+    const box = document.getElementById('online-drivers');
+    if(!box) return;
+    if(!list.length){ box.innerHTML='<div class="empty">No drivers online right now.</div>'; return; }
+    box.innerHTML = `<table><tr><th></th><th>Name</th><th>Vehicle</th><th>Last seen</th><th>Status</th></tr>`+
+      list.map(d=>{
+        const secs=d.seconds_since_ping??0;
+        const seen= secs<60?secs+'s ago':Math.floor(secs/60)+'m ago';
+        const fresh= secs<30;
+        return `<tr><td><span class="dot" style="background:${fresh?'#1D9E75':'#E0A800'}"></span></td>
+          <td>${esc(d.name)}</td><td>${esc(d.vehicle_type||'—')}</td><td>${seen}</td>
+          <td><span class="tag ${d.on_trip?'tag-busy':'tag-on'}">${d.on_trip?'On trip':'Waiting'}</span></td></tr>`;
+      }).join('')+`</table>`;
+  }catch(e){}
+}
+
+// ====================== APPROVALS (merchant store applications) ======================
+let apprTab='pending';
+async function renderApprovals(){
+  setContent(`<div class="toolbar">
+      <span class="subtab ${apprTab==='pending'?'active':''}" onclick="apprTab='pending';renderApprovals()">Pending</span>
+      <span class="subtab ${apprTab==='approved'?'active':''}" onclick="apprTab='approved';renderApprovals()">Approved</span>
+    </div><div id="appr-body"><div class="loading">Loading…</div></div>`);
+  const body=document.getElementById('appr-body');
+  try{
+    const r = await get('/merchant/admin/applications?status='+apprTab);
+    const list = r.applications||r.businesses||[];
+    if(!list.length){ body.innerHTML='<div class="empty">No '+apprTab+' store applications.</div>'; return; }
+    body.innerHTML = `<table><tr><th>Store</th><th>Owner</th><th>Mobile</th><th>Category</th><th>Fee</th><th>Action</th></tr>`+
+      list.map(m=>{
+        const fee = m.commission_type==='percent'?(m.commission_value+'%'):m.commission_type==='flat'?('₱'+m.commission_value+' flat'):'—';
+        return `<tr>
+          <td><b>${esc(m.name)}</b></td>
+          <td>${esc(m.owner_name||m.full_name||'—')}</td>
+          <td>${esc(m.contact_mobile||m.mobile||'—')}</td>
+          <td>${esc(m.category||'—')}</td>
+          <td>${apprTab==='approved'?fee:'—'}</td>
+          <td>${ apprTab==='pending' ?
+            `<button class="btn btn-green" onclick="approveMerchant('${m.id}','${esc(m.name)}')">✓ Approve</button>
+             <button class="btn btn-red" onclick="rejectMerchant('${m.id}')">✕ Reject</button>`
+            : `<button class="btn btn-amber" onclick="suspendMerchant('${m.id}')">Suspend</button>` }
+          </td></tr>`;
+      }).join('')+`</table>`;
+  }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+}
+async function approveMerchant(id,name){
+  // Approve the store. This is the REAL approve endpoint: it sets the store to
+  // 'approved', makes it visible to customers, sets the fee model + free window,
+  // and texts the merchant. (The old code called activate-fees, which only set
+  // the fee and left the store PENDING.)
+  const type = prompt('Fee model for "'+name+'": type "flat", "percent", or "none"','flat');
+  if(type===null) return;
+  let value=0;
+  if(type==='flat'||type==='percent'){
+    const v=prompt(type==='flat'?'Flat fee per order (₱):':'Commission percent (%):', type==='flat'?'5':'15');
+    if(v===null) return; value=parseFloat(v)||0;
+  }
+  const fm=prompt('Free (no-fee) months before the fee starts:', '1');
+  if(fm===null) return;
+  try{
+    await post('/merchant/admin/'+id+'/approve',
+      {commission_type:type, commission_value:value, free_months:parseInt(fm)||0});
+    toast('✓ '+name+' approved'); renderApprovals();
+  }catch(e){ toast(e.message); }
+}
+async function rejectMerchant(id){ if(!confirm('Reject this store?'))return;
+  try{ await post('/merchant/admin/'+id+'/reject'); toast('Rejected'); renderApprovals(); }catch(e){ toast(e.message); } }
+async function suspendMerchant(id){ if(!confirm('Suspend this store?'))return;
+  try{ await post('/merchant/admin/'+id+'/suspend'); toast('Suspended'); renderApprovals(); }catch(e){ toast(e.message); } }
+
+// ====================== DRIVERS ======================
+let driverSub = 'apps';
+async function renderDrivers(){
+  setContent(`<div class="subtabs" style="margin-bottom:12px">
+      <span class="subtab ${driverSub==='apps'?'active':''}" onclick="driverSub='apps';renderDrivers()">📋 Applications</span>
+      <span class="subtab ${driverSub==='manage'?'active':''}" onclick="driverSub='manage';renderDrivers()">🛠 Manage</span>
+      <span class="subtab ${driverSub==='payouts'?'active':''}" onclick="driverSub='payouts';renderDrivers()">💸 Payouts</span>
+    </div><div class="note">Weekly bonuses are in the Growth tab → Bonuses.</div>
+    <div id="dr-body"><div class="loading">Loading…</div></div>`);
+  const body = document.getElementById('dr-body');
+  try{
+    if(driverSub==='apps'){
+      const r = await get('/admin/drivers'); const list = r.drivers||[];
+      const pend = list.filter(d=>d.status==='pending');
+      const rest = list.filter(d=>d.status!=='pending');
+      const rowsP = pend.map(d=>driverRow(d,true)).join('');
+      const rowsR = rest.map(d=>driverRow(d,false)).join('');
+      body.innerHTML = `
+        <div class="section" style="margin-top:0">Pending applications (${pend.length})</div>
+        ${pend.length?`<table><tr><th>Name</th><th>Mobile</th><th>Vehicle</th><th>Docs</th><th>Action</th></tr>${rowsP}</table>`:'<div class="empty">No pending applications.</div>'}
+        <div class="section">All drivers (${rest.length})</div>
+        ${rest.length?`<table><tr><th>Name</th><th>Mobile</th><th>Vehicle</th><th>Status</th><th>Wallet</th><th>Action</th></tr>${rowsR}</table>`:'<div class="empty">No drivers yet.</div>'}`;
+    } else if(driverSub==='manage'){
+      const r = await get('/admin-manage/drivers'); const list = r.drivers||[];
+      body.innerHTML = list.length ? `<table><tr><th>Name</th><th>Mobile</th><th>Status</th><th>Trips</th><th>Action</th></tr>`+
+        list.map(d=>`<tr>
+          <td><b>${esc(d.full_name)}</b></td><td>${esc(d.mobile)}</td>
+          <td><span class="tag ${d.is_suspended?'tag-off':'tag-on'}">${d.is_suspended?'Suspended':'Active'}</span></td>
+          <td>${d.total_trips??0}</td>
+          <td>
+            <button class="btn btn-blue" onclick="driverDetail('${d.id}')">View</button>
+            ${d.is_suspended
+              ? `<button class="btn btn-green" onclick="manageDriver('${d.id}','unsuspend')">Unsuspend</button>`
+              : `<button class="btn btn-amber" onclick="manageDriver('${d.id}','suspend')">Suspend</button>`}
+            <button class="btn btn-red" onclick="removeDriver('${d.id}')">Remove</button>
+          </td></tr>`).join('')+`</table>`
+        : '<div class="empty">No drivers.</div>';
+    } else {
+      // payouts — list drivers, record a manual payout
+      const r = await get('/admin-manage/drivers'); const list = r.drivers||[];
+      body.innerHTML = `<div class="note">Record a manual cash/GCash payout to a driver (e.g. earnings handed over).</div>`+
+        (list.length?`<table><tr><th>Name</th><th>Mobile</th><th>Trips</th><th>Action</th></tr>`+
+        list.map(d=>`<tr><td><b>${esc(d.full_name)}</b></td><td>${esc(d.mobile)}</td><td>${d.total_trips??0}</td>
+          <td><button class="btn btn-green" onclick="payoutDriver('${d.id}','${esc(d.full_name)}')">Record payout</button></td></tr>`).join('')+`</table>`
+        :'<div class="empty">No drivers.</div>');
+    }
+  }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+}
+function driverRow(d, pending){
+  const docs = `<button class="btn btn-blue" onclick="driverDetail('${d.user_id||d.id}')">View docs</button>`;
+  if(pending){
+    return `<tr>
+      <td><b>${esc(d.full_name)}</b></td><td>${esc(d.mobile)}</td>
+      <td>${esc(d.vehicle_type||'—')}${d.plate_no?' · '+esc(d.plate_no):''}</td>
+      <td>${docs}</td>
+      <td><button class="btn btn-green" onclick="approveDriver('${d.user_id||d.id}')">✓ Approve</button>
+          <button class="btn btn-red" onclick="rejectDriver('${d.user_id||d.id}')">✕ Reject</button></td></tr>`;
+  }
+  return `<tr>
+    <td><b>${esc(d.full_name)}</b></td><td>${esc(d.mobile)}</td>
+    <td>${esc(d.vehicle_type||'—')}${d.plate_no?' · '+esc(d.plate_no):''}</td>
+    <td><span class="tag ${d.status==='verified'||d.status==='approved'?'tag-on':d.status==='pending'?'tag-busy':'tag-off'}">${esc(d.status||'—')}</span></td>
+    <td>${peso(d.wallet_balance)}</td>
+    <td><button class="btn btn-blue" onclick="driverDetail('${d.user_id||d.id}')">View</button>
+        <button class="btn btn-blue" onclick="driverWallet('${d.user_id||d.id}','${esc(d.full_name)}')">Wallet</button></td></tr>`;
+}
+async function driverDetail(id){
+  setContent('<div class="loading">Loading…</div>');
+  try{
+    const r = await get('/admin/drivers'); const d = (r.drivers||[]).find(x=>(x.user_id||x.id)===id);
+    if(!d){ setContent('<div class="empty">Driver not found.</div>'); return; }
+    const photo = (url,label)=> url
+      ? `<div style="display:inline-block;margin:6px;text-align:center;vertical-align:top">
+           <a href="${esc(url)}" target="_blank"><img src="${esc(url)}" style="width:200px;height:200px;object-fit:cover;border-radius:10px;border:1px solid #ddd"></a>
+           <div class="note">${label}</div></div>`
+      : `<div style="display:inline-block;margin:6px;width:200px;height:200px;border-radius:10px;border:1px dashed #ccc;text-align:center;line-height:200px;color:#aaa;vertical-align:top">No ${label}</div>`;
+    setContent(`
+      <button class="btn btn-blue" onclick="renderDrivers()">← Back</button>
+      <div class="section">${esc(d.full_name)} — documents</div>
+      <div class="note">${esc(d.mobile)} · ${esc(d.vehicle_type||'')}${d.plate_no?' · '+esc(d.plate_no):''} · status: ${esc(d.status||'—')}</div>
+      <div style="margin:12px 0">
+        ${photo(d.profile_photo,'Profile Photo')}
+        ${photo(d.id_front_url,'ID Front')}
+        ${photo(d.id_back_url,'ID Back')}
+        ${photo(d.selfie_url,'Selfie with ID')}
+      </div>
+      ${d.status==='pending'
+        ? `<button class="btn btn-green" onclick="approveDriver('${d.user_id||d.id}')">✓ Approve</button>
+           <button class="btn btn-red" onclick="rejectDriver('${d.user_id||d.id}')">✕ Reject</button>`
+        : `<button class="btn btn-blue" onclick="driverWallet('${d.user_id||d.id}','${esc(d.full_name)}')">Wallet</button>`}`);
+  }catch(e){ setContent('<div class="empty">'+esc(e.message)+'</div>'); }
+}
+async function manageDriver(id, action){
+  if(!confirm((action==='suspend'?'Suspend':'Unsuspend')+' this driver?'))return;
+  try{ await post('/admin-manage/drivers/'+id+'/'+action,{}); toast('Done'); renderDrivers(); }catch(e){ toast(e.message); }
+}
+async function removeDriver(id){
+  if(!confirm('Remove this driver? (soft delete — they can be restored)'))return;
+  try{ await post('/admin-manage/drivers/'+id+'/remove',{mode:'soft'}); toast('Removed'); renderDrivers(); }catch(e){ toast(e.message); }
+}
+async function payoutDriver(id,name){
+  const amt = prompt('Payout amount (₱) to '+name+':',''); if(amt===null)return;
+  const a = parseFloat(amt); if(!(a>0)){toast('Enter a valid amount');return;}
+  const method = confirm('OK = GCash, Cancel = Cash')?'gcash':'cash';
+  try{ await post('/admin/driver-payouts',{driver_id:id, amount:a, method}); toast('Payout recorded'); }catch(e){ toast(e.message); }
+}
+async function approveDriver(id){ try{ await patch('/admin/drivers/'+id+'/status',{status:'verified'}); toast('Driver approved'); renderDrivers(); }catch(e){ toast(e.message); } }
+async function rejectDriver(id){ if(!confirm('Reject this driver?'))return; try{ await patch('/admin/drivers/'+id+'/status',{status:'rejected'}); toast('Rejected'); renderDrivers(); }catch(e){ toast(e.message); } }
+async function driverWallet(id,name){
+  try{
+    const r = await get('/admin/driver-wallet/'+id+'/history');
+    const bal = r.balance;
+    const rows=(r.transactions||[]).map(t=>`<tr><td>${esc(t.type)}</td><td>${peso(t.amount)}</td><td>${esc(t.note||'')}</td><td>${new Date(t.created_at).toLocaleString()}</td></tr>`).join('');
+    setContent(`<button class="btn btn-blue" onclick="renderDrivers()">← Back to drivers</button>
+      <div class="section">${esc(name)} — wallet ${peso(bal)}</div>
+      <div class="card" style="max-width:560px">
+        <div class="subtabs" style="margin-bottom:10px">
+          <span class="subtab active" id="wt-adjust" onclick="walletTab('adjust')">Adjust</span>
+          <span class="subtab" id="wt-cashout" onclick="walletTab('cashout')">Cash-out</span>
+          <span class="subtab" id="wt-history" onclick="walletTab('history')">History</span>
+        </div>
+        <div id="wt-pane-adjust">
+          <div class="note">Credit adds to the wallet (e.g. confirmed GCash top-up). Debit removes (e.g. correcting a mistake). Both need a short reason for your records.</div>
+          <div class="field"><label>Direction</label>
+            <select id="w-dir"><option value="credit">+ Credit (add)</option><option value="debit">− Debit (remove)</option></select></div>
+          <div class="field"><label>Amount (₱)</label><input id="w-amt" type="number" placeholder="e.g. 200"></div>
+          <div class="field"><label>Reason</label><input id="w-reason" type="text" placeholder="e.g. GCash top-up ref 1234"></div>
+          <button class="btn btn-green" onclick="walletAdjust('${id}','${esc(name)}')">Save adjustment</button>
+        </div>
+        <div id="wt-pane-cashout" style="display:none">
+          <div class="note">Record cash you handed to the driver from their wallet balance. This SUBTRACTS from the wallet (balance: ${peso(bal)}).</div>
+          <div class="field"><label>Cash-out amount (₱)</label><input id="w-cashamt" type="number" placeholder="e.g. 500"></div>
+          <button class="btn btn-amber" onclick="walletCashout('${id}','${esc(name)}')">Record cash-out</button>
+        </div>
+      </div>
+      <div id="wt-pane-history"><table><tr><th>Type</th><th>Amount</th><th>Note</th><th>When</th></tr>${rows||'<tr><td colspan=4 class=empty>No transactions.</td></tr>'}</table></div>`);
+  }catch(e){ toast(e.message); }
+}
+function walletTab(which){
+  ['adjust','cashout','history'].forEach(k=>{
+    document.getElementById('wt-'+k).classList.toggle('active', k===which);
+    const pane=document.getElementById('wt-pane-'+k);
+    if(pane) pane.style.display = (k===which)?'':'none';
+  });
+}
+async function walletAdjust(id,name){
+  const dir=document.getElementById('w-dir').value;
+  const amt=parseFloat(document.getElementById('w-amt').value);
+  if(!amt||amt<=0){toast('Enter an amount greater than 0');return;}
+  const reason=(document.getElementById('w-reason').value||'').trim();
+  if(reason.length<3){toast('A short reason is required (min 3 letters)');return;}
+  if(dir==='debit' && !confirm('Debit (remove) ₱'+amt+' from '+name+'\'s wallet?'))return;
+  try{
+    const r=await post('/admin/driver-wallet/'+id+'/adjust',{amount:amt, direction:dir, reason});
+    toast(r.message||'Wallet updated'); driverWallet(id,name);
+  }catch(e){ toast(e.message); }
+}
+async function walletCashout(id,name){
+  const amt=parseFloat(document.getElementById('w-cashamt').value);
+  if(!amt||amt<=0){toast('Enter an amount greater than 0');return;}
+  if(!confirm('Confirm you handed ₱'+amt+' cash to '+name+'? This subtracts it from their wallet.'))return;
+  try{
+    const r=await post('/admin/driver-wallet/'+id+'/cashout',{amount:amt});
+    toast(r.message||'Cash-out recorded'); driverWallet(id,name);
+  }catch(e){ toast(e.message); }
+}
+
+
+// ====================== MERCHANTS ======================
+let merchantSub='list';
+async function renderMerchants(){
+  setContent(`<div class="subtabs" style="margin-bottom:12px">
+      <span class="subtab ${merchantSub==='list'?'active':''}" onclick="merchantSub='list';renderMerchants()">🏪 Merchants</span>
+      <span class="subtab ${merchantSub==='payments'?'active':''}" onclick="merchantSub='payments';renderMerchants()">🧾 Pending payments</span>
+      <span class="subtab ${merchantSub==='sales'?'active':''}" onclick="merchantSub='sales';renderMerchants()">📊 Sales</span>
+    </div><div id="m-body"><div class="loading">Loading…</div></div>`);
+  const body=document.getElementById('m-body');
+  try{
+    if(merchantSub==='list'){
+      const r=await get('/merchant/admin/merchants'); const list=r.merchants||[];
+      if(!list.length){ body.innerHTML='<div class="empty">No merchants yet.</div>'; return; }
+      body.innerHTML = `<table><tr><th>Store</th><th>Owner</th><th>Status</th><th>Fee owed</th><th>Featured</th><th>Actions</th></tr>`+
+        list.map(b=>{
+          const susp = b.merchant_status==='suspended';
+          const feeLabel = b.commission_type==='percent' ? b.commission_value+'%'
+                         : b.commission_type==='flat' ? '₱'+b.commission_value+'/order'
+                         : 'none';
+          return `<tr>
+            <td><b>${esc(b.name)}</b><div class="note">${esc(feeLabel)}${b.free_until?' · free until '+new Date(b.free_until).toLocaleDateString():''}</div></td>
+            <td>${esc(b.owner_name||'—')}<div class="note">${esc(b.owner_mobile||'')}</div></td>
+            <td><span class="tag ${susp?'tag-off':b.merchant_status==='approved'?'tag-on':'tag-busy'}">${esc(b.merchant_status||'—')}</span>
+                ${b.pending_payments>0?` <span class="tag tag-busy">${b.pending_payments} pending ₱</span>`:''}</td>
+            <td>${peso(b.fee_owed)}</td>
+            <td>${b.is_featured?'<span class="tag tag-gold">⭐ Featured</span>':'<span class="note">—</span>'}</td>
+            <td>
+              <button class="btn btn-blue" onclick="setMerchantFee('${b.id}','${esc(b.name)}')">Set fee</button>
+              ${b.is_featured
+                ? `<button class="btn btn-amber" onclick="merchantAction('${b.id}','unfeature','Unfeature '+'${esc(b.name)}'+'?')">Unfeature</button>`
+                : `<button class="btn btn-gold" onclick="featureMerchant('${b.id}','${esc(b.name)}')">Feature</button>`}
+              ${susp
+                ? `<button class="btn btn-green" onclick="merchantAction('${b.id}','reactivate','Reactivate '+'${esc(b.name)}'+'?')">Reactivate</button>`
+                : `<button class="btn btn-red" onclick="merchantAction('${b.id}','suspend','Suspend '+'${esc(b.name)}'+'? Their store will be hidden.')">Suspend</button>`}
+            </td></tr>`;
+        }).join('')+`</table>`;
+    } else if(merchantSub==='payments'){
+      const r=await get('/merchant/admin/fee-payments'); const list=r.pending||[];
+      if(!list.length){ body.innerHTML='<div class="empty">No pending merchant payments.</div>'; return; }
+      body.innerHTML = list.map(p=>`<div class="card" style="max-width:680px;margin-bottom:12px">
+        <div class="section" style="margin-top:0">${esc(p.business_name)} — ${peso(p.amount)}</div>
+        <div class="note">Method: ${esc(p.method)}${p.gcash_ref?' · ref '+esc(p.gcash_ref):''} · ${new Date(p.created_at).toLocaleString()}
+          ${p.ref_already_used?' · <span class="tag tag-off">⚠ reference reused before</span>':''}</div>
+        <div class="note">Currently owed: ${peso(p.fee_owed)}</div>
+        ${p.receipt_url
+          ? `<a href="${esc(p.receipt_url)}" target="_blank"><img src="${esc(p.receipt_url)}" style="max-width:280px;max-height:340px;border-radius:8px;border:1px solid #ddd;margin:8px 0;display:block"></a>`
+          : '<div class="note" style="margin:8px 0">No screenshot attached.</div>'}
+        <div class="toolbar">
+          <button class="btn btn-green" onclick="payAction('${p.id}','approve')">✓ Approve payment</button>
+          <button class="btn btn-red" onclick="payAction('${p.id}','reject')">✕ Reject</button>
+        </div></div>`).join('');
+    } else {
+      // Sales sub-view — merchant SALES performance (their revenue, not our cut).
+      const r=await get('/merchant/admin/merchant-sales');
+      const sm=r.summary||{}; const list=r.merchants||[];
+      const trend = (sm.month?.sales||0) - (sm.lastMonth?.sales||0);
+      const trendTxt = trend>0 ? `▲ ${peso(trend)} vs last month` : trend<0 ? `▼ ${peso(Math.abs(trend))} vs last month` : 'same as last month';
+      const trendColor = trend>0 ? '#0F6E56' : trend<0 ? '#C0392B' : '#888';
+      body.innerHTML = `
+        <div class="note" style="margin-bottom:10px">Merchant sales = stores' own product revenue on completed orders (before SugoNow's commission). Your commission earned is tracked separately in Insights.</div>
+        <div class="grid stat-grid" style="margin-bottom:8px">
+          <div class="stat"><div class="num">${peso(sm.month?.sales)}</div><div class="lbl">This month · ${sm.month?.orders||0} orders</div></div>
+          <div class="stat"><div class="num">${peso(sm.lastMonth?.sales)}</div><div class="lbl">Last month · ${sm.lastMonth?.orders||0} orders</div></div>
+          <div class="stat"><div class="num" style="font-size:22px">${peso(sm.week?.sales)}</div><div class="lbl">This week · ${sm.week?.orders||0} orders</div></div>
+        </div>
+        <div style="color:${trendColor};font-weight:700;font-size:13px;margin-bottom:14px">${trendTxt}</div>
+        <div class="section" style="margin-top:0">Per-merchant (this month)</div>
+        ${list.length
+          ? `<table><tr><th>Store</th><th>This month</th><th>Orders</th><th>All-time</th></tr>`+
+            list.map(x=>`<tr><td>${esc(x.name)}</td><td><b>${peso(x.month_sales)}</b></td><td>${x.month_orders}</td><td>${peso(x.total_sales)}</td></tr>`).join('')+`</table>`
+          : '<div class="empty">No merchant sales yet.</div>'}`;
+    }
+  }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+}
+async function merchantAction(id,action,confirmMsg){
+  if(confirmMsg && !confirm(confirmMsg))return;
+  try{ await post('/merchant/admin/'+id+'/'+action,{}); toast('Done'); renderMerchants(); }
+  catch(e){ toast(e.message); }
+}
+async function setMerchantFee(id,name){
+  const type=prompt('Fee type for '+name+'? Type: percent, flat, or none','percent');
+  if(type===null)return;
+  if(!['percent','flat','none'].includes(type.trim())){toast('Type must be percent, flat, or none');return;}
+  let val=0;
+  if(type.trim()!=='none'){
+    const v=prompt(type.trim()==='percent'?'Commission percent (e.g. 15)':'Flat ₱ per order (e.g. 5)','');
+    if(v===null)return; val=parseFloat(v); if(isNaN(val)||val<0){toast('Enter a valid number');return;}
+  }
+  const eff=prompt('Effective date (YYYY-MM-DD) — leave blank for today. This is the prior-notice date shown to the merchant.','');
+  if(eff===null)return;
+  try{ await post('/merchant/admin/'+id+'/activate-fees',{commission_type:type.trim(),commission_value:val,effective_date:eff.trim()||undefined});
+    toast('Fee set'); renderMerchants(); }catch(e){ toast(e.message); }
+}
+async function featureMerchant(id,name){
+  const mo=prompt('Feature "'+name+'" as Top Pick for how many months?','1');
+  if(mo===null)return; const months=parseInt(mo)||1;
+  try{ await post('/merchant/admin/'+id+'/feature',{months}); toast('Featured'); renderMerchants(); }catch(e){ toast(e.message); }
+}
+async function payAction(id,action){
+  if(action==='reject' && !confirm('Reject this payment?'))return;
+  try{ await post('/merchant/admin/fee-payments/'+id+'/'+action,{}); toast(action==='approve'?'Payment approved':'Rejected'); renderMerchants(); }
+  catch(e){
+    // Approve may return a reused-reference warning — offer to force.
+    if(action==='approve' && /reference/i.test(e.message) && confirm(e.message+'\n\nApprove anyway?')){
+      try{ await post('/merchant/admin/fee-payments/'+id+'/approve',{force:true}); toast('Payment approved'); renderMerchants(); }catch(e2){ toast(e2.message); }
+    } else { toast(e.message); }
+  }
+}
+
+// ====================== STORES & PRODUCTS ======================
+let catalogView = { mode:'list', biz:null };
+async function renderCatalog(){
+  if(catalogView.mode==='products') return renderCatalogProducts();
+  setContent('<div class="loading">Loading…</div>');
+  try{
+    const r = await get('/admin/businesses'); const list = r.businesses||[];
+    const rows = list.map(b=>{
+      const owner = b.merchant_registered
+        ? `<span class="tag tag-on">Merchant</span> ${esc(b.owner_name||'')}`
+        : '<span class="tag tag-busy">Admin-added</span>';
+      const status = b.merchant_status==='pending' ? '<span class="tag tag-gold">Pending approval</span>'
+                   : b.hidden ? '<span class="tag tag-off">Hidden</span>'
+                   : `<span class="tag tag-on">${esc(b.computed_status||'active')}</span>`;
+      return `<tr>
+        <td><b>${esc(b.name)}</b><div class="note">${esc(b.category||'')}${b.address?' · '+esc(b.address):''}</div></td>
+        <td>${owner}</td>
+        <td>${status}</td>
+        <td>${b.product_count} product${b.product_count===1?'':'s'}</td>
+        <td><button class="btn btn-blue" onclick='catalogProducts(${JSON.stringify(JSON.stringify({id:b.id,name:b.name}))})'>Products</button></td>
+      </tr>`;
+    }).join('');
+    setContent(`
+      <div class="toolbar">
+        <button class="btn btn-green" onclick="showAddBiz()">+ Add business</button>
+      </div>
+      <div class="note">Every business is listed: 🟢 "Merchant" = signed up through the app (pending ones shown first); 🔵 "Admin-added" = you created it here. Nothing is hidden from this list.</div>
+      <div id="addbiz-form"></div>
+      <table><tr><th>Store</th><th>Source</th><th>Status</th><th>Products</th><th></th></tr>${rows||'<tr><td colspan=5 class=empty>No businesses yet.</td></tr>'}</table>`);
+  }catch(e){ setContent('<div class="empty">'+esc(e.message)+'</div>'); }
+}
+function showAddBiz(){
+  document.getElementById('addbiz-form').innerHTML = `
+    <div class="card" style="max-width:520px;margin:10px 0">
+      <div class="section" style="margin-top:0">Add a new business</div>
+      <div class="field"><label>Business name</label><input id="nb-name" placeholder="e.g. Aling Rosa Carinderia"></div>
+      <div class="field"><label>Category</label>
+        <select id="nb-cat"><option>Food</option><option>Grocery</option><option>Bakery</option><option>Pharmacy</option><option>Other</option></select></div>
+      <div class="field"><label>Address / landmark</label><input id="nb-addr" placeholder="e.g. Poblacion East, near plaza"></div>
+      <div class="field"><label>Delivery fee (₱)</label><input id="nb-fee" type="number" value="30">
+        <button class="btn btn-green" onclick="addBiz()">Create business</button></div>
+    </div>`;
+}
+async function addBiz(){
+  const name=document.getElementById('nb-name').value.trim();
+  const category=document.getElementById('nb-cat').value;
+  if(!name){toast('Enter a business name');return;}
+  try{
+    await post('/admin/businesses',{name,category,
+      address:document.getElementById('nb-addr').value.trim(),
+      delivery_fee:parseFloat(document.getElementById('nb-fee').value)||30});
+    toast('Business created'); renderCatalog();
+  }catch(e){ toast(e.message); }
+}
+function catalogProducts(bizJson){
+  catalogView = { mode:'products', biz: JSON.parse(bizJson) };
+  renderCatalog();
+}
+async function renderCatalogProducts(){
+  const biz = catalogView.biz;
+  setContent('<div class="loading">Loading…</div>');
+  try{
+    const r = await get('/admin/businesses/'+biz.id+'/products'); const list=r.products||[];
+    const rows = list.map(p=>`<tr><td>${esc(p.name)}</td><td>${peso(p.price)}</td>
+      <td><button class="btn btn-red" onclick="delProduct('${p.id}')">Delete</button></td></tr>`).join('');
+    setContent(`
+      <button class="btn btn-blue" onclick="catalogView={mode:'list',biz:null};renderCatalog()">← Back to stores</button>
+      <div class="section">${esc(biz.name)} — products</div>
+      <div class="card" style="max-width:520px;margin-bottom:12px">
+        <div class="field"><label>Product name</label><input id="np-name" placeholder="e.g. Chicken Adobo"></div>
+        <div class="field"><label>Price (₱)</label><input id="np-price" type="number" placeholder="e.g. 60">
+          <button class="btn btn-green" onclick="addProduct('${biz.id}')">+ Add product</button></div>
+      </div>
+      <table><tr><th>Product</th><th>Price</th><th></th></tr>${rows||'<tr><td colspan=3 class=empty>No products yet.</td></tr>'}</table>`);
+  }catch(e){ setContent('<div class="empty">'+esc(e.message)+'</div>'); }
+}
+async function addProduct(bizId){
+  const name=document.getElementById('np-name').value.trim();
+  const price=parseFloat(document.getElementById('np-price').value);
+  if(!name||!(price>=0)){toast('Enter product name and price');return;}
+  try{ await post('/admin/businesses/'+bizId+'/products',{name,price}); toast('Product added'); renderCatalogProducts(); }
+  catch(e){ toast(e.message); }
+}
+async function delProduct(id){
+  if(!confirm('Delete this product?'))return;
+  try{ await del('/admin/products/'+id); toast('Deleted'); renderCatalogProducts(); }
+  catch(e){ toast(e.message); }
+}
+
+// ====================== BOOKINGS ======================
+async function renderBookings(){
+  const r = await get('/admin/bookings');
+  const list = r.bookings||[];
+  if(!list.length){ setContent('<div class="empty">No bookings yet.</div>'); return; }
+  setContent(`<table><tr><th>When</th><th>Service</th><th>Customer</th><th>Driver</th><th>Fare</th><th>Status</th></tr>`+
+    list.slice(0,200).map(b=>`<tr>
+      <td>${b.created_at?new Date(b.created_at).toLocaleString():'—'}</td>
+      <td>${esc(b.service_type||'—')}</td>
+      <td>${esc(b.customer_name||'—')}</td>
+      <td>${esc(b.driver_name||'—')}</td>
+      <td>${peso(b.final_fare||b.estimated_fare)}</td>
+      <td><span class="tag ${b.status==='completed'?'tag-on':b.status==='cancelled'?'tag-off':'tag-busy'}">${esc(b.status)}</span></td>
+    </tr>`).join('')+`</table>`);
+}
+</script>
+
+
+<script>
+// ====================== ISSUES (reports + system log) ======================
+let issuesSub='reports';
+async function renderIssues(){
+  setContent(`<div class="toolbar">
+      <span class="subtab ${issuesSub==='reports'?'active':''}" onclick="issuesSub='reports';renderIssues()">⚠️ Complaints</span>
+      <span class="subtab ${issuesSub==='flags'?'active':''}" onclick="issuesSub='flags';renderIssues()">🚩 Fraud flags</span>
+      <span class="subtab ${issuesSub==='syslog'?'active':''}" onclick="issuesSub='syslog';renderIssues()">⚙️ System log</span>
+    </div><div id="issues-body"><div class="loading">Loading…</div></div>`);
+  const body=document.getElementById('issues-body');
+  try{
+    if(issuesSub==='reports'){
+      const r=await get('/admin/reports?resolved=false'); const list=r.reports||[];
+      body.innerHTML = list.length? `<table><tr><th>From</th><th>Role</th><th>Category</th><th>Message</th><th>When</th><th></th></tr>`+
+        list.map(x=>`<tr><td>${esc(x.full_name||x.user_name||'—')}</td><td>${esc(x.role||'')}</td><td>${esc(x.category||'')}</td>
+          <td>${esc(x.message)}</td><td>${x.created_at?new Date(x.created_at).toLocaleDateString():''}</td>
+          <td><button class="btn btn-green" onclick="resolveReport('${x.id}')">Resolve</button></td></tr>`).join('')+`</table>`
+        : '<div class="empty">No open complaints. ✅</div>';
+    } else if(issuesSub==='flags'){
+      const r=await get('/admin/fraud-flags'); const list=r.flags||r.fraud_flags||[];
+      body.innerHTML = list.length? `<table><tr><th>Type</th><th>Detail</th><th>When</th></tr>`+
+        list.map(x=>`<tr><td>${esc(x.flag_type||x.type||'')}</td><td>${esc(x.detail||x.note||x.reason||'')}</td>
+          <td>${x.created_at?new Date(x.created_at).toLocaleString():''}</td></tr>`).join('')+`</table>`
+        : '<div class="empty">No fraud flags. ✅</div>';
+    } else {
+      const r=await get('/admin/error-log'); const list=r.errors||[];
+      body.innerHTML = `<div class="toolbar"><button class="btn btn-red" onclick="clearSysLog()">Clear log</button></div>`+
+        (list.length? `<table><tr><th>Context</th><th>Message</th><th>When</th></tr>`+
+        list.map(x=>`<tr><td><b>${esc(x.context)}</b></td><td>${esc(x.message)}</td>
+          <td>${x.created_at?new Date(x.created_at).toLocaleString():''}</td></tr>`).join('')+`</table>`
+        : '<div class="empty">No background errors. ✅</div>');
+    }
+  }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+}
+async function resolveReport(id){ try{ await patch('/admin/reports/'+id+'/resolve'); toast('Resolved'); renderIssues(); }catch(e){ toast(e.message); } }
+async function clearSysLog(){ if(!confirm('Clear the system log?'))return; try{ await post('/admin/error-log/clear'); toast('Cleared'); renderIssues(); }catch(e){ toast(e.message); } }
+
+// ====================== MONEY (fares & fees) ======================
+async function renderMoney(){
+  setContent('<div class="loading">Loading…</div>');
+  let cr={}, cd={}, st={}, ep={}, sg=null, fs={};
+  try{ cr=await get('/admin/commission-rate'); }catch(e){}
+  try{ cd=await get('/admin/cooldown-settings'); }catch(e){}
+  try{ st=await get('/admin/staleness-settings'); }catch(e){}
+  try{ ep=await get('/admin/errand-premium'); }catch(e){}
+  let cf=null; try{ cf=await get('/admin/cancel-fee'); }catch(e){}
+  let df=null; try{ df=await get('/admin/delivery-fares'); }catch(e){}
+  let gs={}; try{ gs=await get('/admin/gcash-settings'); }catch(e){}
+  try{ const s=await get('/admin/surge'); sg=s.surge||s; }catch(e){}
+  try{ const f=await get('/pass/admin/settings'); fs=f.settings||f||{}; }catch(e){}
+  setContent(`
+    <div class="section">💳 Payment settings (GCash)</div>
+    <div class="note">The GCash number and account name shown wherever people pay SugoNow: customers (SugoPass), merchants (Top Pick), and drivers (wallet top-up).</div>
+    <div class="field"><label>GCash number</label>
+      <input id="m-gcash-num" type="text" value="${gs.gcash_number||''}" placeholder="e.g. 0917 123 4567"></div>
+    <div class="field"><label>GCash account name (what payers see)</label>
+      <input id="m-gcash-name" type="text" value="${gs.gcash_name||'SugoNow'}" placeholder="e.g. Juan D. / SugoNow"></div>
+    <div class="field"><label>Top Pick price (₱ / month)</label>
+      <input id="m-toppick" type="number" value="${gs.toppick_price||300}">
+      <button class="btn btn-green" onclick="savePayment()">Save payment settings</button></div>
+    <div class="section">Commission</div>
+    <div class="field"><label>Commission rate (%)</label>
+      <input id="m-comm" type="number" value="${cr.rate??cr.commission_rate??15}">
+      <button class="btn btn-green" onclick="saveComm()">Save</button></div>
+    <div class="section">⚡ Surge / peak pricing</div>
+    <div class="note">When ON, all fares are multiplied by the surge rate. Customers see a peak-pricing notice. Same control as the mobile admin.</div>
+    <div class="field"><label>Surge active</label>
+      <select id="m-surge-active">
+        <option value="false" ${sg&&sg.active?'':'selected'}>Off</option>
+        <option value="true" ${sg&&sg.active?'selected':''}>On</option>
+      </select></div>
+    <div class="field"><label>Multiplier (e.g. 1.25 = +25%)</label>
+      <input id="m-surge-mult" type="number" step="0.05" value="${(sg&&sg.multiplier)||1.25}"></div>
+    <div class="field"><label>Label shown to customers</label>
+      <input id="m-surge-label" type="text" value="${(sg&&sg.label)||'Peak pricing in effect'}">
+      <button class="btn btn-green" onclick="saveSurge()">Save surge</button></div>
+
+    <div class="section">Booking fee</div>
+    <div class="note">A small per-order fee, deducted from the driver's wallet with the commission at completion (Pass members skip it).</div>
+    <div class="field"><label>Booking fee active</label>
+      <select id="m-bfee-active">
+        <option value="false" ${fs.booking_fee_active?'':'selected'}>Off</option>
+        <option value="true" ${fs.booking_fee_active?'selected':''}>On</option>
+      </select></div>
+    <div class="field"><label>Booking fee (₱)</label>
+      <input id="m-bfee" type="number" value="${fs.booking_fee??5}">
+      <button class="btn btn-green" onclick="saveBfee()">Save booking fee</button></div>
+
+    <div class="section">SugoPass (subscription)</div>
+    <div class="note">When ON, customers can buy a Pass that waives booking fees for a set number of days.</div>
+    <div class="field"><label>Pass active</label>
+      <select id="m-pass-active">
+        <option value="false" ${fs.pass_active?'':'selected'}>Off</option>
+        <option value="true" ${fs.pass_active?'selected':''}>On</option>
+      </select></div>
+    <div class="field"><label>Pass price (₱)</label>
+      <input id="m-pass-price" type="number" value="${fs.pass_price??49}"></div>
+    <div class="field"><label>Pass duration (days)</label>
+      <input id="m-pass-days" type="number" value="${fs.pass_days??30}">
+      <button class="btn btn-green" onclick="savePass()">Save Pass</button></div>
+
+    <div class="section">Custom errand fee</div>
+    <div class="note">Extra fee on CUSTOM errands because the driver shops for the item. Survey: 55% pay up to ₱20, 77% up to ₱40. Set 0 to turn off.</div>
+    <div class="field"><label>Errand premium (₱)</label>
+      <input id="m-errand" type="number" value="${ep?.errand_premium??15}">
+      <button class="btn btn-green" onclick="saveErrand()">Save</button></div>
+    <div class="section">Delivery base fares & per-km</div>
+    <div class="note">Base fare per service + the shared per-km rate. Raise these when fuel/inflation bites. Changes apply to NEW bookings within ~30s and the customer Terms update automatically.</div>
+    <div class="field"><label>Food / store delivery base (₱)</label>
+      <input id="m-fare-food" type="number" value="${df?.food??20}"></div>
+    <div class="field"><label>LPG delivery base (₱)</label>
+      <input id="m-fare-lpg" type="number" value="${df?.lpg??40}"></div>
+    <div class="field"><label>Water refill base (₱)</label>
+      <input id="m-fare-water" type="number" value="${df?.water??30}"></div>
+    <div class="field"><label>Custom / pasabuy base (₱)</label>
+      <input id="m-fare-custom" type="number" value="${df?.custom??20}"></div>
+    <div class="field"><label>Per-km rate, all services (₱/km)</label>
+      <input id="m-fare-perkm" type="number" value="${df?.per_km??8}">
+      <button class="btn btn-green" onclick="saveDeliveryFares()">Save all fares</button></div>
+    <div class="note">Tricycle ride base (₱${df?.ride_base??25}) is set in Zones. Per-km above is shared with rides.</div>
+    <div class="section">Custom cancellation fee</div>
+    <div class="note">Charged to a customer who cancels a CUSTOM/pasabuy order AFTER the driver already bought the goods. Returnable goods = just this fee; non-returnable = goods price + this fee. Set 0 to turn off.</div>
+    <div class="field"><label>Cancellation fee (₱)</label>
+      <input id="m-cancelfee" type="number" value="${cf?.cancel_fee??50}">
+      <button class="btn btn-green" onclick="saveCancelFee()">Save</button></div>
+    <div class="section">🧹 Auto-cleanup (live ops hygiene)</div>
+    <div class="note">A booking nobody accepts auto-cancels; a driver who closed the app is auto-offlined. Set 0 to disable.</div>
+    <div class="field"><label>Auto-cancel unaccepted bookings (min)</label>
+      <input id="m-pend" type="number" value="${st.pending_expiry_min??12}"></div>
+    <div class="field"><label>Auto-offline silent drivers (min)</label>
+      <input id="m-stale" type="number" value="${st.driver_stale_min??5}">
+      <button class="btn btn-green" onclick="saveStale()">Save</button></div>
+    <div class="section">Cancellation cooldown</div>
+    <div class="note">When OFF, customers are never cooled down for cancelling. When ON, repeated cancels trigger a temporary block. Same control as the mobile admin.</div>
+    <div class="field"><label>Cooldown active</label>
+      <select id="cd-active">
+        <option value="false" ${cd.active===true?'':'selected'}>Off</option>
+        <option value="true" ${cd.active===true?'selected':''}>On</option>
+      </select></div>
+    <div class="field"><label>Soft cooldown after N cancels</label>
+      <input id="cd-sc" type="number" value="${cd.soft_count??3}"></div>
+    <div class="field"><label>Soft cooldown hours</label>
+      <input id="cd-sh" type="number" value="${cd.soft_hours??2}"></div>
+    <div class="field"><label>Hard cooldown after N cancels</label>
+      <input id="cd-hc" type="number" value="${cd.hard_count??5}"></div>
+    <div class="field"><label>Hard cooldown hours</label>
+      <input id="cd-hh" type="number" value="${cd.hard_hours??24}">
+      <button class="btn btn-green" onclick="saveCooldown()">Save</button></div>`);
+}
+async function saveSurge(){ try{ await post('/admin/surge',{active:document.getElementById('m-surge-active').value==='true',multiplier:parseFloat(document.getElementById('m-surge-mult').value)||1.25,label:document.getElementById('m-surge-label').value||'Peak pricing in effect'}); toast('Surge saved'); }catch(e){ toast(e.message); } }
+async function saveBfee(){ try{ await post('/pass/admin/settings',{booking_fee_active:document.getElementById('m-bfee-active').value==='true',booking_fee:parseFloat(document.getElementById('m-bfee').value)||0}); toast('Booking fee saved'); }catch(e){ toast(e.message); } }
+async function savePass(){ try{ await post('/pass/admin/settings',{pass_active:document.getElementById('m-pass-active').value==='true',pass_price:parseFloat(document.getElementById('m-pass-price').value)||0,pass_days:parseInt(document.getElementById('m-pass-days').value)||30}); toast('Pass saved'); }catch(e){ toast(e.message); } }
+async function saveComm(){ try{ await post('/admin/commission-rate',{rate:parseFloat(document.getElementById('m-comm').value)}); toast('Commission saved'); }catch(e){ toast(e.message); } }
+async function savePayment(){ try{ await post('/admin/gcash-settings',{
+    gcash_number:document.getElementById('m-gcash-num').value.trim(),
+    gcash_name:document.getElementById('m-gcash-name').value.trim()||'SugoNow',
+    toppick_price:parseFloat(document.getElementById('m-toppick').value)||300}); toast('Payment settings saved'); }catch(e){ toast(e.message); } }
+async function saveErrand(){ try{ await post('/admin/errand-premium',{errand_premium:parseFloat(document.getElementById('m-errand').value)}); toast('Errand fee saved'); }catch(e){ toast(e.message); } }
+async function saveCancelFee(){ try{ await post('/admin/cancel-fee',{cancel_fee:parseFloat(document.getElementById('m-cancelfee').value)}); toast('Cancellation fee saved'); }catch(e){ toast(e.message); } }
+async function saveDeliveryFares(){ try{ await post('/admin/delivery-fares',{
+    food:parseFloat(document.getElementById('m-fare-food').value),
+    lpg:parseFloat(document.getElementById('m-fare-lpg').value),
+    water:parseFloat(document.getElementById('m-fare-water').value),
+    custom:parseFloat(document.getElementById('m-fare-custom').value),
+    per_km:parseFloat(document.getElementById('m-fare-perkm').value)}); toast('Fares saved'); }catch(e){ toast(e.message); } }
+async function saveStale(){ try{ await post('/admin/staleness-settings',{pending_expiry_min:parseFloat(document.getElementById('m-pend').value),driver_stale_min:parseFloat(document.getElementById('m-stale').value)}); toast('Auto-cleanup saved'); }catch(e){ toast(e.message); } }
+async function saveCooldown(){ try{ await post('/admin/cooldown-settings',{active:document.getElementById('cd-active').value==='true',soft_count:+document.getElementById('cd-sc').value,soft_hours:+document.getElementById('cd-sh').value,hard_count:+document.getElementById('cd-hc').value,hard_hours:+document.getElementById('cd-hh').value}); toast('Cooldown saved'); }catch(e){ toast(e.message); } }
+
+// ====================== GROWTH & WALLETS ======================
+let growthSub='topups';
+async function renderGrowth(){
+  setContent(`<div class="toolbar">
+      <span class="subtab ${growthSub==='topups'?'active':''}" onclick="growthSub='topups';renderGrowth()">💰 Top-ups</span>
+      <span class="subtab ${growthSub==='promos'?'active':''}" onclick="growthSub='promos';renderGrowth()">🎁 Promos</span>
+      <span class="subtab ${growthSub==='milestones'?'active':''}" onclick="growthSub='milestones';renderGrowth()">🏆 Bonuses</span>
+    </div><div id="growth-body"><div class="loading">Loading…</div></div>`);
+  const body=document.getElementById('growth-body');
+  try{
+    if(growthSub==='topups'){
+      const p=await get('/driver-wallet/admin/pending'); const list=p.pending||[];
+      body.innerHTML = `<div class="section">Pending top-ups (${list.length})</div>`+
+        (list.length? list.map(x=>`<div class="card" style="max-width:620px;margin-bottom:12px">
+          <div class="section" style="margin-top:0">${esc(x.full_name)} — ${peso(x.amount)}</div>
+          <div class="note">${esc(x.mobile)} · ${x.method==='cash'?'💵 Cash at office':'📱 GCash'}${x.gcash_ref?' · ref '+esc(x.gcash_ref):''} · ${new Date(x.created_at).toLocaleString()}
+            ${x.ref_already_used?' · <span class="tag tag-off">⚠ reference reused before</span>':''}</div>
+          ${x.method!=='cash'
+            ? (x.proof_url
+                ? `<a href="${esc(x.proof_url)}" target="_blank"><img src="${esc(x.proof_url)}" style="max-width:260px;max-height:320px;border-radius:8px;border:1px solid #ddd;margin:8px 0;display:block"></a>`
+                : '<div class="note" style="margin:8px 0">No screenshot attached.</div>')
+            : '<div class="note" style="margin:8px 0">Driver will pay cash at the office — confirm once received.</div>'}
+          <div class="toolbar">
+            <button class="btn btn-green" onclick="topupApprove('${x.id}')">✓ Approve & credit</button>
+            <button class="btn btn-red" onclick="topupReject('${x.id}')">✕ Reject</button>
+          </div></div>`).join('')
+        : '<div class="empty">No pending top-ups.</div>');
+    } else if(growthSub==='promos'){
+      const r=await get('/growth/admin/settings'); const st=r.settings||{};
+      body.innerHTML = `
+        <div class="field"><label>Earn-credit amount (₱)</label><input id="g-earn" type="number" value="${st.earnCredit??0}"><button class="btn btn-green" onclick="saveGrowth('earn_credit_amount','g-earn')">Save</button></div>
+        <div class="field"><label>Referral amount each side (₱)</label><input id="g-ref" type="number" value="${st.referral??0}"><button class="btn btn-green" onclick="saveGrowth('referral_amount','g-ref')">Save</button></div>
+        <div class="field"><label>Milestone target trips</label><input id="g-mt" type="number" value="${st.milestoneTrips??0}"><button class="btn btn-green" onclick="saveGrowth('milestone_target_trips','g-mt')">Save</button></div>
+        <div class="field"><label>Milestone bonus (₱)</label><input id="g-mb" type="number" value="${st.milestoneBonus??0}"><button class="btn btn-green" onclick="saveGrowth('milestone_bonus','g-mb')">Save</button></div>`;
+    } else {
+      const r=await get('/growth/admin/milestones'); const list=r.drivers||[];
+      body.innerHTML = `<div class="note">Drivers who hit ${r.target||'—'} trips at ${r.min_rating||'—'}★ qualify for ₱${r.bonus||0}.</div>`+
+        (list.length? `<table><tr><th>Driver</th><th>Trips</th><th>Rating</th><th>Action</th></tr>`+
+        list.map(x=>`<tr><td>${esc(x.full_name)}</td><td>${x.trips_done}</td><td>${x.rating>0?parseFloat(x.rating).toFixed(1)+'★':'<span class="note">unrated</span>'}</td>
+          <td>${x.bonus_paid
+                ? '<span class="tag tag-on">Paid this week</span>'
+                : x.below_rating
+                  ? '<span class="tag tag-busy">Below '+r.min_rating+'★</span>'
+                  : `<button class="btn btn-gold" onclick="payMilestone('${x.id}')">Mark ₱${r.bonus} paid</button>`}</td></tr>`).join('')+`</table>`
+        : '<div class="empty">No drivers have hit the target yet.</div>');
+    }
+  }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+}
+async function topupApprove(id){ try{ await post('/driver-wallet/admin/approve/'+id); toast('Approved'); renderGrowth(); }catch(e){ toast(e.message); } }
+async function topupReject(id){ try{ await post('/driver-wallet/admin/reject/'+id); toast('Rejected'); renderGrowth(); }catch(e){ toast(e.message); } }
+async function saveGrowth(key,inputId){ try{ await post('/growth/admin/settings',{key,value:parseFloat(document.getElementById(inputId).value)}); toast('Saved'); }catch(e){ toast(e.message); } }
+async function payMilestone(id){ if(!confirm('Mark this week\'s bonus as paid (credit to driver wallet)?'))return; try{ await post('/growth/admin/milestones/'+id+'/pay',{method:'wallet'}); toast('Bonus paid'); renderGrowth(); }catch(e){ toast(e.message); } }
+
+// ====================== INSIGHTS ======================
+async function renderInsights(){
+  const a = await get('/admin/analytics');
+  const o = a.overall||a||{};
+  let cm=null; try{ cm=await get('/admin/commission-report'); }catch(e){}
+  const row = (label, d, m) => `<tr><td>${label}</td><td>${peso(d)}</td><td>${peso(m)}</td><td><b>${peso((d||0)+(m||0))}</b></td></tr>`;
+  const commBlock = cm ? `
+    <div class="section">💵 Commission / revenue (SugoNow's earnings)</div>
+    <div class="note">Driver = commission + booking fee from completed trips. Merchant = fees collected from stores. This is money RECEIVED, by period.</div>
+    <table>
+      <tr><th>Period</th><th>From drivers</th><th>From merchants</th><th>Total</th></tr>
+      ${row('This week',  cm.driver?.week,      cm.merchant?.week)}
+      ${row('This month', cm.driver?.month,     cm.merchant?.month)}
+      ${row('Last month', cm.driver?.lastMonth, cm.merchant?.lastMonth)}
+      ${row('All-time',   cm.driver?.total_all, cm.merchant?.total_all)}
+    </table>
+    <div class="grid stat-grid" style="margin-top:12px">
+      <div class="stat"><div class="num" style="color:var(--amber)">${peso(cm.merchant?.outstanding)}</div><div class="lbl">Merchant fees still owed (to collect)${cm.merchant?.outstanding_stores?` · ${cm.merchant.outstanding_stores} stores`:''}</div></div>
+    </div>` : '';
+  setContent(`<div class="grid stat-grid">
+      <div class="stat"><div class="num">${o.total_bookings??o.bookings??'—'}</div><div class="lbl">Total bookings</div></div>
+      <div class="stat"><div class="num">${peso(o.total_revenue||o.revenue)}</div><div class="lbl">Total revenue (GMV)</div></div>
+      <div class="stat"><div class="num">${o.completed??'—'}</div><div class="lbl">Completed</div></div>
+      <div class="stat"><div class="num">${o.cancelled??'—'}</div><div class="lbl">Cancelled</div></div>
+    </div>
+    ${commBlock}
+    <div class="note" style="margin-top:12px">Per-driver and per-merchant detail are in the Drivers and Merchants tabs.</div>`);
+}
+
+// ====================== USERS ======================
+async function renderUsers(){
+  let ua=null; try{ ua=await get('/admin/user-analytics'); }catch(e){}
+  const overview = ua ? `
+    <div class="section">👥 Users overview</div>
+    <div class="grid stat-grid">
+      <div class="stat"><div class="num" style="color:var(--green)">+${ua.new_today??0}</div><div class="lbl">New today</div></div>
+      <div class="stat"><div class="num" style="color:var(--green)">+${ua.new_week??0}</div><div class="lbl">New this week</div></div>
+      <div class="stat"><div class="num">${ua.repeat_customers??0}</div><div class="lbl">Repeat customers (2+ orders)</div></div>
+      <div class="stat"><div class="num">${ua.active_30d??0}</div><div class="lbl">Booked in last 30 days</div></div>
+      <div class="stat"><div class="num">${ua.customers??0} / ${ua.drivers??0} / ${ua.merchants??0}</div><div class="lbl">Customers / Drivers / Merchants</div></div>
+      <div class="stat"><div class="num" style="color:var(--red)">${ua.banned??0}</div><div class="lbl">Banned / suspended</div></div>
+    </div>` : '';
+  setContent(`${overview}
+    <div class="section">🔍 Find a user</div>
+    <div class="toolbar">
+      <input id="u-q" placeholder="Search name or mobile…" style="width:260px">
+      <button class="btn btn-green" onclick="searchUsers()">Search</button>
+    </div><div id="users-body"><div class="note">Type a name or number and search.</div></div>`);
+  document.getElementById('u-q').addEventListener('keydown',e=>{if(e.key==='Enter')searchUsers();});
+}
+async function searchUsers(){
+  const q=document.getElementById('u-q').value.trim();
+  const body=document.getElementById('users-body');
+  body.innerHTML='<div class="loading">Searching…</div>';
+  try{
+    const r=await get('/admin/users?search='+encodeURIComponent(q));
+    const list=r.users||[];
+    body.innerHTML = list.length? `<table><tr><th>Name</th><th>Mobile</th><th>Role</th><th>Status</th><th>Unpaid Fee</th><th>Action</th></tr>`+
+      list.map(u=>{
+        const fee=parseFloat(u.unpaid_cancel_fee||0);
+        const feeCell = fee>0
+          ? `<span class="tag tag-off">₱${Math.round(fee)}</span> <button class="btn btn-green" onclick="clearFee('${u.id}')">Mark paid</button>`
+          : '<span class="note">—</span>';
+        return `<tr><td>${esc(u.full_name)}</td><td>${esc(u.mobile)}</td><td>${esc(u.role)}</td>
+        <td>${u.banned?'<span class="tag tag-off">Banned</span>':'<span class="tag tag-on">Active</span>'}</td>
+        <td>${feeCell}</td>
+        <td>${u.banned?`<button class="btn btn-green" onclick="userAction('${u.id}','unban')">Unban</button>`:`<button class="btn btn-amber" onclick="userAction('${u.id}','ban')">Ban</button>`}</td></tr>`;
+      }).join('')+`</table>`
+      : '<div class="empty">No users found.</div>';
+  }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+}
+async function userAction(id,action){
+  if(action==='unban'){ if(!confirm('Unban this user?'))return;
+    try{ await post('/admin/users/'+id+'/unban',{}); toast('Unbanned'); searchUsers(); }catch(e){ toast(e.message); } return; }
+  // ban: collect days + reason + message
+  const days = prompt('Suspend for how many days? (0 or blank = indefinite)','7');
+  if(days===null) return;
+  const reason = prompt('Internal reason (for your records):','Violation of the SugoNow terms of use');
+  if(reason===null) return;
+  const message = prompt('Message to show the user (optional):','');
+  if(message===null) return;
+  try{ await post('/admin/users/'+id+'/ban',{days:parseInt(days)||0, reason, message}); toast('User suspended'); searchUsers(); }
+  catch(e){ toast(e.message); }
+}
+async function clearFee(id){
+  if(!confirm('Mark this cancellation fee as PAID? The customer will be able to book again.'))return;
+  try{ await post('/admin/users/'+id+'/clear-cancel-fee',{}); toast('Fee cleared'); searchUsers(); }
+  catch(e){ toast(e.message); }
+}
+
+// ====================== LANDMARKS ======================
+let lmTab='pending';
+async function renderLandmarks(){
+  setContent(`<div class="toolbar">
+      <span class="subtab ${lmTab==='pending'?'active':''}" onclick="lmTab='pending';renderLandmarks()">Pending</span>
+      <span class="subtab ${lmTab==='approved'?'active':''}" onclick="lmTab='approved';renderLandmarks()">Approved</span>
+      <span class="subtab ${lmTab==='all'?'active':''}" onclick="lmTab='all';renderLandmarks()">All</span>
+    </div><div id="lm-body"><div class="loading">Loading…</div></div>`);
+  const body=document.getElementById('lm-body');
+  try{
+    const sp = lmTab==='all'?'':('?status='+lmTab);
+    const r=await get('/landmarks/admin/list'+sp); const list=r.landmarks||[];
+    body.innerHTML = list.length? `<table><tr><th>Name</th><th>Category</th><th>Coords</th><th>Status</th><th>Action</th></tr>`+
+      list.map(l=>`<tr><td><b>${esc(l.name)}</b>${l.address_hint?'<br><span class=note>'+esc(l.address_hint)+'</span>':''}</td>
+        <td>${esc(l.category)}</td><td>${parseFloat(l.lat).toFixed(5)}, ${parseFloat(l.lng).toFixed(5)}</td>
+        <td><span class="tag ${l.status==='approved'?'tag-on':l.status==='pending'?'tag-busy':'tag-off'}">${esc(l.status)}</span></td>
+        <td>${l.status!=='approved'?`<button class="btn btn-green" onclick="lmApprove('${l.id}')">✓</button>`:''}
+            ${l.status==='pending'?`<button class="btn btn-amber" onclick="lmReject('${l.id}')">✕</button>`:''}
+            <button class="btn btn-red" onclick="lmDelete('${l.id}','${esc(l.name)}')">🗑</button></td></tr>`).join('')+`</table>`
+      : '<div class="empty">No landmarks here.</div>';
+  }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+}
+async function lmApprove(id){ try{ await post('/landmarks/admin/'+id+'/approve'); toast('Approved'); renderLandmarks(); }catch(e){ toast(e.message); } }
+async function lmReject(id){ try{ await post('/landmarks/admin/'+id+'/reject'); toast('Rejected'); renderLandmarks(); }catch(e){ toast(e.message); } }
+async function lmDelete(id,name){ if(!confirm('Delete "'+name+'"?'))return; try{ await del('/landmarks/admin/'+id); toast('Deleted'); renderLandmarks(); }catch(e){ toast(e.message); } }
+
+// ====================== INIT ======================
+if(TOKEN){ startApp(); }
+document.getElementById('li-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+</script>
+
+</body>
+</html>
