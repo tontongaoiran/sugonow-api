@@ -374,6 +374,7 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
       passenger_count = 1, custom_note, unlisted_store, custom_photo,
       use_promo = false,
       use_wallet = false,
+      use_voucher = false,
       lpg_mode, lpg_brand, lpg_size, lpg_est_cost,
       water_mode, container_count = 1, tank_count = 1, location_note,
       refill_where, refill_note,
@@ -504,6 +505,38 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
       fareData.total_fare = Math.round(productsTotal) + deliveryFee;
     }
 
+    // ── Free-delivery voucher (auto-applied on food orders) ──
+    // If the customer has an active free_food_delivery voucher and chose to use
+    // it, waive the delivery fee. We mark the voucher used and record the waived
+    // amount on the booking (discount_amount/note) so the driver can later be
+    // reimbursed for the free delivery (handled at completion).
+    let voucherApplied = false, voucherId = null, voucherWaived = 0;
+    if (use_voucher && service_type === 'food' && isStoreOrder && deliveryFee > 0) {
+      try {
+        // expire stale, then grab the soonest-expiring active free-food voucher
+        await query(`UPDATE vouchers SET status='expired'
+                     WHERE customer_id=$1 AND status='active' AND expires_at < NOW()`,
+                    [req.user.id]);
+        const { rows: vrows } = await query(
+          `SELECT id FROM vouchers
+           WHERE customer_id=$1 AND status='active' AND type='free_food_delivery'
+           ORDER BY expires_at LIMIT 1`, [req.user.id]);
+        if (vrows[0]) {
+          voucherId = vrows[0].id;
+          voucherWaived = deliveryFee;
+          voucherApplied = true;
+          // Waive the delivery portion from the customer's total.
+          fareData.delivery_fee = 0;
+          fareData.total_fare = Math.round(productsTotal);
+          // Record on the booking (reuses discount columns) so it's auditable and
+          // so the driver can be reimbursed for the free delivery at completion.
+          fareData.discount_amount = (parseFloat(fareData.discount_amount) || 0) + voucherWaived;
+          fareData.discount_note = ((fareData.discount_note ? fareData.discount_note + ' ' : '') +
+                                    `Free-delivery voucher (₱${voucherWaived})`).trim();
+        }
+      } catch (e) { logError('voucherApply', e); }
+    }
+
     // First-booking promo (customer chose to use it on this booking)
     let promoApplied = null, promoDiscount = 0, finalFare = fareData.total_fare, promoCap = 50;
     if (use_promo) {
@@ -584,6 +617,21 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
       ]
     );
     const booking = rows[0];
+
+    // Mark the free-delivery voucher as used and link it to this booking, so it
+    // can't be reused and so completion can reimburse the driver for it.
+    if (voucherApplied && voucherId) {
+      try {
+        await query(
+          `UPDATE vouchers SET status='used', used_on=$1, used_at=NOW()
+           WHERE id=$2 AND customer_id=$3 AND status='active'`,
+          [booking.id, voucherId, req.user.id]);
+      } catch (e) {
+        // Fallback if used_on/used_at columns don't exist — at least mark it used.
+        try { await query(`UPDATE vouchers SET status='used' WHERE id=$1`, [voucherId]); }
+        catch (e2) { logError('voucherMarkUsed', e2); }
+      }
+    }
 
     // Optional "where to find me" note for the driver (any service).
     if (location_note && String(location_note).trim()) {
@@ -711,6 +759,7 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
     res.status(201).json({
       success: true, booking_id: booking.id, status: 'pending',
       fare: fareData, zone: activeZone.name,
+      voucher_applied: voucherApplied, voucher_waived: voucherWaived,
       dispatch: dispatch.dispatched
         ? `Notifying nearest driver (${dispatch.driver.full_name})...`
         : 'No drivers available right now. We will keep trying.',
