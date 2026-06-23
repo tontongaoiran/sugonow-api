@@ -1059,6 +1059,17 @@ router.get('/:id/track', authenticate, async (req, res) => {
       const elapsed = (Date.now() - new Date(trk.price_requested_at).getTime()) / 1000;
       trk.price_seconds_left = Math.max(0, Math.round(mins * 60 - elapsed));
     }
+    // Include the live order items so the driver's shopping checklist reflects
+    // removals/substitutions in real time (active items only — removed/unavailable
+    // /substituted-original rows are excluded; the substitute replacement is 'ok').
+    try {
+      const { rows: items } = await query(
+        `SELECT id, product_name, quantity, unit_price, options_text, status
+         FROM order_items
+         WHERE booking_id=$1 AND (status='ok' OR status IS NULL)
+         ORDER BY id`, [req.params.id]);
+      trk.order_items = items;
+    } catch (e) { /* non-fatal — checklist just won't refresh this tick */ }
     res.json({ success: true, tracking: trk });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
