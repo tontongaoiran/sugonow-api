@@ -38,7 +38,7 @@
     text-decoration:none;font-size:14px;cursor:pointer;border-left:3px solid transparent}
   .nav a:hover{background:rgba(255,255,255,.06)}
   .nav a.active{background:rgba(255,255,255,.12);border-left-color:var(--gold);color:#fff;font-weight:700}
-  .nav a .pill{margin-left:auto;background:var(--gold);color:var(--dark);font-size:11px;
+  .nav a .pill{margin-left:auto;background:#E0245E;color:#fff;font-weight:800;font-size:11px;min-width:18px;text-align:center;border-radius:9px;padding:1px 6px;
     font-weight:800;border-radius:10px;padding:1px 8px;min-width:20px;text-align:center}
   .sidebar .foot{padding:14px 18px;border-top:1px solid rgba(255,255,255,.12);font-size:12px;color:#9FC9BB}
   .logout{color:#fff;cursor:pointer;text-decoration:underline;margin-top:6px;display:inline-block}
@@ -217,6 +217,8 @@ function startApp(){
   document.getElementById('who').textContent = sessionStorage.getItem('sn_admin_name')||'Admin';
   buildNav();
   go('overview');
+  pollNotifs();                          // initial badge load
+  setInterval(pollNotifs, 20000);        // refresh badges + alert sound every 20s
 }
 function buildNav(){
   const nav=document.getElementById('nav');
@@ -224,8 +226,65 @@ function buildNav(){
     `<a id="nav-${k}" onclick="go('${k}')"><span>${icon}</span><span>${esc(label)}</span><span class="pill" id="pill-${k}" style="display:none"></span></a>`
   ).join('');
 }
+// ====================== ADMIN NOTIFICATIONS (badges + sound) ======================
+// Polls pending counts and shows a red pill on each relevant tab. Plays an alert
+// sound on every poll while anything is pending, so the admin can't miss it.
+// Badges clear automatically when the admin acts (the pending item leaves the queue).
+let notifAudio = null;
+function ensureNotifAudio(){
+  if(!notifAudio){
+    // Short alert beep via WebAudio (no external file needed).
+    try{
+      notifAudio = () => {
+        const ctx = new (window.AudioContext||window.webkitAudioContext)();
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type='sine'; o.frequency.value=880; o.connect(g); g.connect(ctx.destination);
+        g.gain.setValueAtTime(0.0001, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime+0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+0.4);
+        o.start(); o.stop(ctx.currentTime+0.42);
+      };
+    }catch(e){ notifAudio = ()=>{}; }
+  }
+}
+// Map notification counts to tab pills.
+function applyNotifPills(n){
+  const map = {
+    approvals: (n.driver_approvals||0) + (n.merchant_apps||0),
+    drivers:   (n.driver_approvals||0),
+    merchants: (n.merchant_apps||0) + (n.toppick_requests||0),
+    growth:    (n.topups||0),
+    money:     (n.pass_payments||0),
+    issues:    (n.reports||0) + (n.complaints||0) + (n.helpdesk||0),
+  };
+  let total = 0;
+  for(const k of Object.keys(map)){
+    const pill = document.getElementById('pill-'+k);
+    if(!pill) continue;
+    const c = map[k];
+    total += c;
+    if(c > 0){ pill.textContent = c; pill.style.display='inline-block'; }
+    else { pill.style.display='none'; }
+  }
+  return total;
+}
+async function pollNotifs(){
+  try{
+    const r = await get('/admin/notifications');
+    if(!r || r.success===false) return;
+    const total = applyNotifPills(r);
+    // Sound on EVERY poll while anything is pending (as requested).
+    if(total > 0){ ensureNotifAudio(); try{ notifAudio(); }catch(e){} }
+    // Reflect total in the page title bar too.
+    document.title = total>0 ? `(${total}) SugoNow Admin` : 'SugoNow Admin';
+  }catch(e){}
+}
+
 function go(tab){
   CURRENT=tab;
+  // Acting on a tab clears its pill immediately for snappy feedback (the next
+  // poll re-syncs from the server, so it reappears only if items truly remain).
+  setTimeout(()=>{ const p=document.getElementById('pill-'+tab); if(p) p.style.display='none'; }, 300);
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
   document.getElementById('nav-'+tab)?.classList.add('active');
   document.getElementById('page-title').textContent = (TABS.find(t=>t[0]===tab)||[])[2]||'';
