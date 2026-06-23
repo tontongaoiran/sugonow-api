@@ -1046,6 +1046,8 @@ router.get('/:id/track', authenticate, async (req, res) => {
               b.dispatch_exhausted, b.eligible_vehicle, b.water_mode, b.lpg_mode,
               b.price_ceiling, b.actual_price, b.price_approval_status, b.price_requested_at,
               b.goods_purchased,
+              COALESCE(b.wallet_credit_used,0) AS wallet_credit_used,
+              COALESCE(b.voucher_discount,0) AS voucher_discount,
               dp.current_lat AS driver_lat, dp.current_lng AS driver_lng,
               dp.last_ping_at, u.full_name AS driver_name, dp.plate_number,
               u.mobile AS driver_mobile,
@@ -1265,6 +1267,12 @@ router.patch('/:id/complete', authenticate, requireVerifiedDriver, async (req, r
                lpg_product_cost: lpgCost, total_paid: totalPaid,
                cash_to_collect: cashToCollect, credit_applied: creditUsed,
                sugonow_cut: sugonowCut,
+               // Itemized so the driver sees every deduction (−) and reimbursement (+):
+               commission_amount: split.commission_amount,   // − from wallet
+               commission_rate_pct: Math.round((split.commission_rate ?? commRate) * 100), // e.g. 15
+               booking_fee: bookingFee,                       // − from wallet
+               credit_reimbursement: creditUsed,              // + to wallet (credit used)
+               voucher_reimbursement: voucherDiscount,        // + to wallet (voucher used)
                driver_wallet_balance: dwallet,
                wallet_low: dwallet < 50,
                receipt });
