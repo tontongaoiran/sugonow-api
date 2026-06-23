@@ -9,6 +9,7 @@
  *  - Driver weekly milestone tracking
  */
 const { query } = require('../db/pool');
+const { sendPush } = require('./pushNotificationService');
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 async function settings() {
@@ -100,6 +101,13 @@ async function onBookingCompleted(booking) {
        VALUES ($1,'free_food_delivery',$2,$3)`,
       [customerId, booking.id, expires]
     );
+    // Let the customer know they earned it, so it doesn't sit unnoticed.
+    const validHrs = s.voucherHours;
+    const validText = validHrs % 24 === 0 ? `${validHrs / 24} day(s)` : `${validHrs} hours`;
+    sendPush(customerId, '🎟️ You earned a FREE delivery!',
+      `Thanks for your order! Your next food delivery is FREE — use it within ${validText}. Tap to order.`,
+      { type: 'voucher_earned' }
+    ).catch(() => {});
   }
 
   // 4. Driver milestone progress
