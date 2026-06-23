@@ -17,6 +17,36 @@ const { sendPush } = require('../services/pushNotificationService');
 const router = express.Router();
 router.use(authenticate);
 
+// Recompute a food/delivery booking's total after items change (remove/sub).
+// New estimated_fare = (sum of ACTIVE order items) + the stored delivery_fee.
+// Only the products portion changes; delivery fee and booking fee stay as-is.
+// Returns the new amounts so callers can report them to the apps.
+async function recomputeBookingTotal(bookingId) {
+  // Active items = anything the driver will actually buy: status 'ok' or null.
+  // Excludes removed / unavailable / substituted (the replacement row is 'ok').
+  const { rows: pt } = await query(
+    `SELECT COALESCE(SUM(unit_price * quantity), 0) AS products_total
+     FROM order_items
+     WHERE booking_id=$1 AND (status='ok' OR status IS NULL)`, [bookingId]);
+  const productsTotal = parseFloat(pt[0]?.products_total || 0);
+
+  const { rows: bk } = await query(
+    `SELECT delivery_fee, booking_fee, booking_fee_waived FROM bookings WHERE id=$1`, [bookingId]);
+  const deliveryFee = parseFloat(bk[0]?.delivery_fee || 0);
+
+  // estimated_fare bundles products + delivery (booking_fee is tracked separately).
+  const newFare = Math.round(productsTotal + deliveryFee);
+  await query(`UPDATE bookings SET estimated_fare=$1 WHERE id=$2`, [newFare, bookingId]);
+
+  return {
+    products_total: Math.round(productsTotal),
+    delivery_fee:   Math.round(deliveryFee),
+    estimated_fare: newFare,
+    booking_fee:    parseFloat(bk[0]?.booking_fee || 0),
+    booking_fee_waived: !!bk[0]?.booking_fee_waived,
+  };
+}
+
 // ── DRIVER: mark an order item unavailable + suggest substitutes ─────────────
 router.post('/unavailable', requireRole('driver'), async (req, res) => {
   try {
@@ -101,14 +131,16 @@ router.post('/resolve', async (req, res) => {
 
     if (action === 'remove') {
       await query(`UPDATE order_items SET status='removed' WHERE id=$1`, [order_item_id]);
-      // notify driver
+      // Recompute the order total so the customer pays / driver collects less.
+      const totals = await recomputeBookingTotal(orig[0].booking_id);
+      // notify driver (now includes the new amount to collect)
       const { rows: b } = await query(`SELECT driver_id FROM bookings WHERE id=$1`, [orig[0].booking_id]);
       if (b[0]?.driver_id) {
         sendPush(b[0].driver_id, 'Customer removed an item',
-          `"${orig[0].product_name}" was removed from the order.`,
+          `"${orig[0].product_name}" removed. New amount to collect: ₱${totals.estimated_fare}.`,
           { type: 'sub_resolved', bookingId: orig[0].booking_id }).catch(() => {});
       }
-      return res.json({ success: true, action: 'removed' });
+      return res.json({ success: true, action: 'removed', totals });
     }
 
     if (action === 'substitute' && substitute_product_id) {
@@ -125,13 +157,15 @@ router.post('/resolve', async (req, res) => {
         [orig[0].booking_id, sp[0].id, sp[0].name, orig[0].quantity,
          parseFloat(sp[0].price), 'Substitute', order_item_id]
       );
+      // Recompute the order total (substitute may cost more or less).
+      const totals = await recomputeBookingTotal(orig[0].booking_id);
       const { rows: b } = await query(`SELECT driver_id FROM bookings WHERE id=$1`, [orig[0].booking_id]);
       if (b[0]?.driver_id) {
         sendPush(b[0].driver_id, 'Substitute chosen',
-          `Customer replaced "${orig[0].product_name}" with "${sp[0].name}".`,
+          `Replaced "${orig[0].product_name}" with "${sp[0].name}". New amount to collect: ₱${totals.estimated_fare}.`,
           { type: 'sub_resolved', bookingId: orig[0].booking_id }).catch(() => {});
       }
-      return res.json({ success: true, action: 'substituted', substitute: sp[0] });
+      return res.json({ success: true, action: 'substituted', substitute: sp[0], totals });
     }
 
     res.status(400).json({ success: false, message: 'Invalid action.' });
