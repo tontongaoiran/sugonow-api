@@ -597,8 +597,11 @@ router.patch('/fcm-token', async (req, res) => {
 router.get('/me', authenticate, async (req, res) => {
   try {
     const { rows } = await query(
-      `SELECT id, full_name, mobile, email, role, profile_photo, created_at
-       FROM users WHERE id=$1`, [req.user.id]);
+      `SELECT u.id, u.full_name, u.mobile, u.email, u.role, u.created_at,
+              COALESCE(u.profile_photo, dp.photo_url) AS profile_photo
+       FROM users u
+       LEFT JOIN driver_profiles dp ON dp.user_id = u.id
+       WHERE u.id=$1`, [req.user.id]);
     if (!rows.length) return res.status(404).json({ success: false, message: 'Account not found.' });
     res.json({ success: true, user: rows[0] });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }

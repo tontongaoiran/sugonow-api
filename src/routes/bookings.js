@@ -994,7 +994,8 @@ router.get('/:id/track', authenticate, async (req, res) => {
               dp.current_lat AS driver_lat, dp.current_lng AS driver_lng,
               dp.last_ping_at, u.full_name AS driver_name, dp.plate_number,
               u.mobile AS driver_mobile,
-              dp.vehicle_type, dp.vehicle_color, dp.vehicle_model, dp.photo_url AS driver_photo,
+              dp.vehicle_type, dp.vehicle_color, dp.vehicle_model,
+              COALESCE(u.profile_photo, dp.photo_url) AS driver_photo,
               b.payment_method
        FROM bookings b
        LEFT JOIN driver_profiles dp ON dp.user_id=b.driver_id
