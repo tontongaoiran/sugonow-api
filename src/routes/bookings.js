@@ -631,6 +631,12 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
         try { await query(`UPDATE vouchers SET status='used' WHERE id=$1`, [voucherId]); }
         catch (e2) { logError('voucherMarkUsed', e2); }
       }
+      // Record the waived delivery amount on the booking so the driver can be
+      // reimbursed for the free delivery at completion (Batch 3).
+      try {
+        await query(`UPDATE bookings SET voucher_discount=$1 WHERE id=$2`,
+                    [voucherWaived, booking.id]);
+      } catch (e) { logError('voucherDiscountRecord', e); }
     }
 
     // Optional "where to find me" note for the driver (any service).
@@ -1149,6 +1155,19 @@ router.patch('/:id/complete', authenticate, requireVerifiedDriver, async (req, r
         await G.creditDriverWallet(req.user.id, creditUsed, 'credit_reimbursement',
           `Reimbursement: customer paid ₱${creditUsed.toFixed(2)} via SugoNow credit on booking ${booking.id.slice(0,8)}`);
       } catch (e) { logError('creditReimbursement', e); }
+    }
+
+    // ── Free-delivery voucher reimbursement (Batch 3) ──
+    // If the customer used a free-delivery voucher, the driver delivered for free
+    // (the delivery fee was waived from the customer's total). That waived delivery
+    // is SugoNow's promotional cost, NOT the driver's — so credit the driver's
+    // wallet the waived amount, making them whole for the delivery they performed.
+    const voucherDiscount = parseFloat(booking.voucher_discount ?? 0);
+    if (voucherDiscount > 0) {
+      try {
+        await G.creditDriverWallet(req.user.id, voucherDiscount, 'voucher_reimbursement',
+          `Reimbursement: free-delivery voucher (₱${voucherDiscount.toFixed(2)}) on booking ${booking.id.slice(0,8)}`);
+      } catch (e) { logError('voucherReimbursement', e); }
     }
 
     await query(
