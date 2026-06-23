@@ -67,7 +67,8 @@ router.post('/unavailable', requireRole('driver'), async (req, res) => {
     let suggestions = [];
     if (item[0].business_id) {
       const { rows: subs } = await query(
-        `SELECT id, name, price, emoji, photo_url
+        `SELECT id, name, price, emoji, photo_url,
+                COALESCE(has_options, FALSE) AS has_options
          FROM menu_items
          WHERE business_id=$1 AND available=TRUE AND id <> $2
          ORDER BY ABS(price - $3) ASC, name
@@ -106,7 +107,9 @@ router.get('/booking/:bookingId', async (req, res) => {
       let suggestions = [];
       if (it.business_id) {
         const { rows: subs } = await query(
-          `SELECT id, name, price, emoji, photo_url FROM menu_items
+          `SELECT id, name, price, emoji, photo_url,
+                  COALESCE(has_options, FALSE) AS has_options
+           FROM menu_items
            WHERE business_id=$1 AND available=TRUE AND id <> $2
            ORDER BY ABS(price - $3) ASC, name LIMIT 4`,
           [it.business_id, it.product_id, it.unit_price]
@@ -124,7 +127,8 @@ router.get('/booking/:bookingId', async (req, res) => {
 // ── CUSTOMER: choose a substitute OR remove the item ─────────────────────────
 router.post('/resolve', async (req, res) => {
   try {
-    const { order_item_id, action, substitute_product_id } = req.body;
+    const { order_item_id, action, substitute_product_id,
+            options_text: subOptionsText, unit_price: subUnitPrice } = req.body;
     // action: 'substitute' | 'remove'
     const { rows: orig } = await query(`SELECT * FROM order_items WHERE id=$1`, [order_item_id]);
     if (!orig[0]) return res.status(404).json({ success: false, message: 'Item not found.' });
@@ -149,13 +153,19 @@ router.post('/resolve', async (req, res) => {
       if (!sp[0]) return res.status(404).json({ success: false, message: 'Substitute not found.' });
 
       await query(`UPDATE order_items SET status='substituted' WHERE id=$1`, [order_item_id]);
+      // Use the customer's customized price + options when provided (the app sends
+      // these after they pick add-ons in the options screen); else the base product.
+      const finalUnit = (subUnitPrice != null && !isNaN(parseFloat(subUnitPrice)))
+        ? parseFloat(subUnitPrice) : parseFloat(sp[0].price);
+      const finalOpts = (subOptionsText && String(subOptionsText).trim())
+        ? String(subOptionsText).trim() : 'Substitute';
       await query(
         `INSERT INTO order_items
            (booking_id, product_id, product_name, quantity, unit_price,
             options_text, status, substitute_for)
          VALUES ($1,$2,$3,$4,$5,$6,'ok',$7)`,
         [orig[0].booking_id, sp[0].id, sp[0].name, orig[0].quantity,
-         parseFloat(sp[0].price), 'Substitute', order_item_id]
+         finalUnit, finalOpts, order_item_id]
       );
       // Recompute the order total (substitute may cost more or less).
       const totals = await recomputeBookingTotal(orig[0].booking_id);
