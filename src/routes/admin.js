@@ -15,7 +15,7 @@ router.use(authenticate, requireRole('admin'));
 // show a red badge with a number on each relevant tab.
 router.get('/notifications', async (req, res) => {
   try {
-    const [drivers, merchants, toppick, pass, flags, helpdesk, complaints] = await Promise.all([
+    const [drivers, merchants, toppick, pass, flags, helpdesk, complaints, topups] = await Promise.all([
       query(`SELECT COUNT(*)::int AS n FROM driver_profiles WHERE status='pending'`),
       query(`SELECT COUNT(*)::int AS n FROM businesses WHERE merchant_status='pending'`),
       query(`SELECT COUNT(*)::int AS n FROM merchant_feature_requests WHERE status='pending'`).catch(() => ({ rows: [{ n: 0 }] })),
@@ -23,6 +23,7 @@ router.get('/notifications', async (req, res) => {
       query(`SELECT COUNT(*)::int AS n FROM fraud_flags WHERE resolved=FALSE`).catch(() => ({ rows: [{ n: 0 }] })),
       query(`SELECT COUNT(*)::int AS n FROM app_reports WHERE status='open'`).catch(() => ({ rows: [{ n: 0 }] })),
       query(`SELECT COUNT(*)::int AS n FROM ratings WHERE is_report=TRUE AND resolved=FALSE`).catch(() => ({ rows: [{ n: 0 }] })),
+      query(`SELECT COUNT(*)::int AS n FROM driver_topup_requests WHERE status='pending'`).catch(() => ({ rows: [{ n: 0 }] })),
     ]);
     res.json({
       success: true,
@@ -33,6 +34,7 @@ router.get('/notifications', async (req, res) => {
       reports:          flags.rows[0].n,
       helpdesk:         helpdesk.rows[0].n,
       complaints:       complaints.rows[0].n,
+      topups:           topups.rows[0].n,
       issues:           flags.rows[0].n + helpdesk.rows[0].n + complaints.rows[0].n,
       total: drivers.rows[0].n + merchants.rows[0].n + toppick.rows[0].n
              + pass.rows[0].n + flags.rows[0].n + helpdesk.rows[0].n
