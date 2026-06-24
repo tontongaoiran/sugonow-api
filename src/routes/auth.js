@@ -16,7 +16,7 @@ const jwt     = require('jsonwebtoken');
 const { query, withTransaction } = require('../db/pool');
 const { customerUpload, driverUpload,
         handleUploadError, fileUrl } = require('../middleware/upload');
-const { sendSms } = require('../services/smsService');
+const { sendSms, sendPrioritySms } = require('../services/smsService');
 const { normalizePhone } = require('../utils/phone');
 const { authenticate } = require('../middleware/auth');
 
@@ -65,7 +65,7 @@ router.post('/send-otp', async (req, res) => {
       try {
         await query(
           `INSERT INTO otp_codes (mobile, code, purpose, expires_at)
-           VALUES ($1, '123456', $2, NOW() + INTERVAL '60 minutes')`,
+           VALUES ($1, '123456', $2, NOW() + INTERVAL '5 minutes')`,
           [mobile.trim(), purpose]
         );
       } catch (e) {
@@ -105,7 +105,10 @@ router.post('/send-otp', async (req, res) => {
       });
     }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // Generate a real 6-digit code. Never emit the reserved test code 123456
+    // as a genuine OTP, so it can only ever mean "test mode".
+    let code = Math.floor(100000 + Math.random() * 900000).toString();
+    while (code === '123456') code = Math.floor(100000 + Math.random() * 900000).toString();
     console.log('  [1] normalized mobile =', mobile, '| about to INSERT otp_codes');
 
     // Store the OTP FIRST. This is a fast local DB write and MUST finish before we
@@ -122,10 +125,9 @@ router.post('/send-otp', async (req, res) => {
     // 2-5s Semaphore round-trip before unfreezing.)
     res.json({ success: true, message: 'OTP sent via SMS.' });
 
-    // Send the SMS in the BACKGROUND (fire-and-forget). The text still arrives a
-    // few seconds later, exactly as before — the app just doesn't wait for it.
-    // Same pattern already used for the welcome SMS in /register-customer.
-    sendSms(mobile.trim(), `SugoNow OTP: ${code}. Valid for 5 minutes.`)
+    // Send the OTP in the BACKGROUND on the PRIORITY route so it skips Semaphore's
+    // shared queue and arrives in seconds (2 credits). The app still doesn't wait.
+    sendPrioritySms(mobile.trim(), `SugoNow OTP: ${code}. Valid for 5 minutes.`)
       .then((smsResult) => {
         console.log('  [3] Semaphore raw response =', JSON.stringify(smsResult));
       })
@@ -154,6 +156,14 @@ const verifyOtpInternal = async (mobile, otp, purpose) => {
   if (TEST_MODE) {
     console.log('  ✅ TEST MODE — accepting any OTP');
     return true;
+  }
+
+  // Belt-and-suspenders: 123456 is the reserved TEST-MODE code and is never a
+  // valid real OTP. Refuse it outright in production, so even a stale test-mode
+  // row left in otp_codes can never be used to pass verification.
+  if (cleanOtp === '123456') {
+    console.log('  ✋ Production mode — refusing reserved test code 123456');
+    return false;
   }
 
   // Production mode — strict verification
@@ -706,10 +716,12 @@ router.post('/change-mobile/request', authenticate, async (req, res) => {
     await query(
       `INSERT INTO otp_codes (mobile, code, purpose, expires_at)
        VALUES ($1,$2,'change_mobile', NOW() + INTERVAL '10 minutes')`, [new_mobile, code]);
-    // OTP is essential SMS — always sends (not gated by NOTIFICATION_SMS).
-    await sendSms(new_mobile, `SugoNow: Your code to change your number is ${code}. Valid 10 minutes.`);
+    // Reply immediately so the screen doesn't freeze, then send the OTP in the
+    // background on the PRIORITY route (essential SMS, not gated by NOTIFICATION_SMS).
     res.json({ success: true, message: 'We sent a code to the new number.' });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    sendPrioritySms(new_mobile, `SugoNow: Your code to change your number is ${code}. Valid 10 minutes.`)
+      .catch((e) => console.error('  ❌ change-mobile OTP send failed:', e.message));
+  } catch (err) { if (!res.headersSent) res.status(500).json({ success: false, message: err.message }); }
 });
 
 // Step 2: verify the OTP and switch the number.
