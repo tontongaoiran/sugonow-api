@@ -79,22 +79,68 @@ router.post('/send-otp', async (req, res) => {
       });
     }
 
+    // ── Resend cooldown ──────────────────────────────────────────────────────
+    // Block another code for this same number + purpose within COOLDOWN_SECONDS
+    // of the last one. The FIRST request always passes (no prior row). The code
+    // already sent stays valid for its full 5 minutes, so the user is never
+    // locked out of a code they already have — this only stops rapid resends.
+    // Side benefit: caps Semaphore SMS spend against double-taps / abuse.
+    const COOLDOWN_SECONDS = 30;
+    const { rows: recentOtp } = await query(
+      `SELECT EXTRACT(EPOCH FROM (NOW() - created_at)) AS age_seconds
+         FROM otp_codes
+        WHERE mobile=$1 AND purpose=$2
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [mobile.trim(), purpose]
+    );
+    if (recentOtp[0] && Number(recentOtp[0].age_seconds) < COOLDOWN_SECONDS) {
+      const retryAfter = Math.ceil(COOLDOWN_SECONDS - Number(recentOtp[0].age_seconds));
+      console.log(`  ⏳ Resend blocked — ${retryAfter}s left on cooldown for ${mobile}`);
+      return res.status(429).json({
+        success: false,
+        cooldown: true,
+        retry_after: retryAfter,
+        message: `Please wait ${retryAfter} second${retryAfter === 1 ? '' : 's'} before requesting another code.`,
+      });
+    }
+
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     console.log('  [1] normalized mobile =', mobile, '| about to INSERT otp_codes');
+
+    // Store the OTP FIRST. This is a fast local DB write and MUST finish before we
+    // reply, because /verify-otp reads the code back out of this table.
     await query(
       `INSERT INTO otp_codes (mobile, code, purpose, expires_at)
        VALUES ($1, $2, $3, NOW() + INTERVAL '5 minutes')`,
       [mobile.trim(), code, purpose]
     );
-    console.log('  [2] otp_codes INSERT ok | about to call Semaphore. KEY present =', !!process.env.SEMAPHORE_API_KEY, '| SENDER =', process.env.SEMAPHORE_SENDER);
-    const smsResult = await sendSms(mobile.trim(),
-      `SugoNow OTP: ${code}. Valid for 5 minutes.`
-    );
-    console.log('  [3] Semaphore raw response =', JSON.stringify(smsResult));
+    console.log('  [2] otp_codes INSERT ok | replying to app NOW, then sending SMS in background. KEY present =', !!process.env.SEMAPHORE_API_KEY, '| SENDER =', process.env.SEMAPHORE_SENDER);
+
+    // Reply to the app IMMEDIATELY so the loading spinner stops right away.
+    // (This is what fixes the "frozen screen" — the app no longer waits for the
+    // 2-5s Semaphore round-trip before unfreezing.)
     res.json({ success: true, message: 'OTP sent via SMS.' });
+
+    // Send the SMS in the BACKGROUND (fire-and-forget). The text still arrives a
+    // few seconds later, exactly as before — the app just doesn't wait for it.
+    // Same pattern already used for the welcome SMS in /register-customer.
+    sendSms(mobile.trim(), `SugoNow OTP: ${code}. Valid for 5 minutes.`)
+      .then((smsResult) => {
+        console.log('  [3] Semaphore raw response =', JSON.stringify(smsResult));
+      })
+      .catch((smsErr) => {
+        // The OTP is already stored, so the user can use "resend" if the text
+        // never arrives. We only log the failure here.
+        console.error('  [3] Semaphore send FAILED (OTP still stored; user can resend):', smsErr.message);
+      });
   } catch (err) {
     console.error('send-otp error:', err.message);
-    res.status(500).json({ success: false, message: 'Could not send OTP.' });
+    // Guard against trying to reply twice: if we already sent the success reply
+    // above, the headers are gone and we must not call res again.
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: 'Could not send OTP.' });
+    }
   }
 });
 
