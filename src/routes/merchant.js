@@ -259,8 +259,20 @@ router.get('/products', requireRole('merchant'), async (req, res) => {
     const businessId = await myBusinessId(req.user.id);
     if (!businessId) return res.json({ success: true, products: [] });
     const { rows } = await query(
-      `SELECT id, name, description, price, emoji, photo_url, has_options, available, brand, weight_kg, is_bestseller
-       FROM menu_items WHERE business_id=$1 ORDER BY sort_order, name`,
+      `SELECT mi.id, mi.name, mi.description, mi.price, mi.emoji, mi.photo_url, mi.has_options,
+              mi.available, mi.brand, mi.weight_kg, mi.is_bestseller,
+              COALESCE(s.sold_30d, 0) AS sold_30d
+       FROM menu_items mi
+       LEFT JOIN (
+         SELECT oi.product_id AS id, SUM(oi.quantity) AS sold_30d
+         FROM order_items oi
+         JOIN bookings b ON b.id = oi.booking_id
+          AND b.status = 'completed'
+          AND b.created_at >= NOW() - INTERVAL '30 days'
+         WHERE oi.product_id IS NOT NULL
+         GROUP BY oi.product_id
+       ) s ON s.id = mi.id
+       WHERE mi.business_id=$1 ORDER BY mi.sort_order, mi.name`,
       [businessId]);
     res.json({ success: true, products: rows, business_id: businessId });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }

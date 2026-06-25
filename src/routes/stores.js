@@ -207,11 +207,21 @@ router.get('/:id', async (req, res) => {
     }
 
     const { rows: products } = await query(
-      `SELECT id, name, description, price, emoji, category, unit, stock,
-              photo_url, has_options, is_bestseller
-       FROM menu_items
-       WHERE business_id=$1 AND stock > 0 AND COALESCE(available, TRUE) = TRUE
-       ORDER BY is_bestseller DESC, category, name`,
+      `SELECT mi.id, mi.name, mi.description, mi.price, mi.emoji, mi.category, mi.unit, mi.stock,
+              mi.photo_url, mi.has_options, mi.is_bestseller,
+              COALESCE(s.sold_30d, 0) AS sold_30d
+       FROM menu_items mi
+       LEFT JOIN (
+         SELECT oi.product_id AS id, SUM(oi.quantity) AS sold_30d
+         FROM order_items oi
+         JOIN bookings b ON b.id = oi.booking_id
+          AND b.status = 'completed'
+          AND b.created_at >= NOW() - INTERVAL '30 days'
+         WHERE oi.product_id IS NOT NULL
+         GROUP BY oi.product_id
+       ) s ON s.id = mi.id
+       WHERE mi.business_id=$1 AND mi.stock > 0 AND COALESCE(mi.available, TRUE) = TRUE
+       ORDER BY mi.is_bestseller DESC, COALESCE(s.sold_30d, 0) DESC, mi.category, mi.name`,
       [req.params.id]
     );
     res.json({ success: true, store: store[0], products });
