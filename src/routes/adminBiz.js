@@ -222,6 +222,26 @@ router.patch('/businesses/:id/toggle', async (req, res) => {
   }
 });
 
+// ─── PATCH /admin/businesses/:id/category — change a store's primary category ──
+// Lets admin correct a miscategorized store (e.g. an LPG dealer saved as 'food').
+// Only customer-recognized categories are allowed.
+router.patch('/businesses/:id/category', async (req, res) => {
+  try {
+    const ALLOWED = ['food', 'bakery', 'grocery', 'lpg', 'water', 'pharmacy'];
+    const category = (req.body.category || '').toLowerCase().trim();
+    if (!ALLOWED.includes(category)) {
+      return res.status(400).json({ success: false, message: 'Invalid category.' });
+    }
+    const { rows } = await query(
+      `UPDATE businesses SET category=$1 WHERE id=$2 RETURNING id, name, category`,
+      [category, req.params.id]);
+    if (!rows[0]) return res.status(404).json({ success: false, message: 'Business not found.' });
+    res.json({ success: true, business: rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ─── Surge control ───────────────────────────────────────────────────────────
 router.get('/surge', async (req, res) => {
   try {
