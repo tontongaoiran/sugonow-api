@@ -147,10 +147,13 @@ router.post('/send-otp', async (req, res) => {
 });
 
 // ─── verifyOtpInternal (PATCHED to accept ANY OTP in test mode) ──────────────
-const verifyOtpInternal = async (mobile, otp, purpose) => {
+// consume=true (default): on a valid match, mark the code used (one-time use).
+// consume=false: validate WITHOUT marking it used — for multi-step UIs that need
+// to check a code mid-flow and still let the final step verify-and-consume it.
+const verifyOtpInternal = async (mobile, otp, purpose, consume = true) => {
   mobile = normalizePhone(mobile) || (mobile || '').trim();
   const cleanOtp = (otp || '').toString().trim();
-  console.log(`  🔑 OTP check — TEST_MODE: ${TEST_MODE} | mobile: ${mobile} | otp: "${cleanOtp}"`);
+  console.log(`  🔑 OTP check — TEST_MODE: ${TEST_MODE} | mobile: ${mobile} | otp: "${cleanOtp}" | consume: ${consume}`);
 
   // In TEST MODE, accept ANY OTP since no real SMS is sent
   if (TEST_MODE) {
@@ -175,7 +178,9 @@ const verifyOtpInternal = async (mobile, otp, purpose) => {
     [mobile.trim(), cleanOtp, purpose]
   );
   if (rows[0]) {
-    await query('UPDATE otp_codes SET is_used=TRUE WHERE id=$1', [rows[0].id]);
+    if (consume) {
+      await query('UPDATE otp_codes SET is_used=TRUE WHERE id=$1', [rows[0].id]);
+    }
     return true;
   }
   return false;
@@ -190,6 +195,25 @@ router.post('/verify-otp', async (req, res) => {
     res.json({ success: valid });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── POST /auth/check-otp ─────────────────────────────────────────────────────
+// Non-consuming OTP check. Lets a multi-step screen (e.g. forgot-password step 2)
+// validate the code the moment it's entered WITHOUT marking it used, so the final
+// step can still verify-and-consume it. Honors TEST_MODE and the 123456 guard.
+router.post('/check-otp', async (req, res) => {
+  try {
+    const { otp, purpose = 'registration' } = req.body;
+    let { mobile } = req.body;
+    if (!mobile || !otp) {
+      return res.status(400).json({ success: false, valid: false, message: 'Mobile and OTP are required.' });
+    }
+    mobile = normalizePhone(mobile) || (mobile || '').trim();
+    const valid = await verifyOtpInternal(mobile, otp, purpose, false); // false = do NOT consume
+    res.json({ success: true, valid });
+  } catch (err) {
+    res.status(500).json({ success: false, valid: false, message: err.message });
   }
 });
 
