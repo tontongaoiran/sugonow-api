@@ -629,6 +629,7 @@ async function renderMerchants(){
             <td>${b.is_featured?'<span class="tag tag-gold">⭐ Featured</span>':'<span class="note">—</span>'}</td>
             <td>
               <button class="btn btn-blue" onclick="setMerchantFee('${b.id}','${esc(b.name)}')">Set fee</button>
+              <button class="btn btn-blue" onclick="changeCategory('${b.id}','${esc(b.name)}')">🏷 Category</button>
               ${b.is_featured
                 ? `<button class="btn btn-amber" onclick="merchantAction('${b.id}','unfeature','Unfeature '+'${esc(b.name)}'+'?')">Unfeature</button>`
                 : `<button class="btn btn-gold" onclick="featureMerchant('${b.id}','${esc(b.name)}')">Feature</button>`}
@@ -674,6 +675,14 @@ async function renderMerchants(){
           : '<div class="empty">No merchant sales yet.</div>'}`;
     }
   }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+}
+async function changeCategory(id,name){
+  const cats=['food','bakery','grocery','lpg','water','pharmacy'];
+  const c=(prompt('New category for '+name+'\n\nType one of: '+cats.join(', ')+'\n\n(Customers can browse food, bakery, lpg, water. grocery and pharmacy have no shopping screen yet.)')||'').toLowerCase().trim();
+  if(!c) return;
+  if(!cats.includes(c)){ toast('Invalid category: '+c); return; }
+  try{ await patch('/admin/businesses/'+id+'/category',{category:c}); toast(name+' is now '+c.toUpperCase()); renderMerchants(); }
+  catch(e){ toast(e.message); }
 }
 async function merchantAction(id,action,confirmMsg){
   if(confirmMsg && !confirm(confirmMsg))return;
