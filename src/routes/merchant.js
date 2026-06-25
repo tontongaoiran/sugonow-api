@@ -259,7 +259,7 @@ router.get('/products', requireRole('merchant'), async (req, res) => {
     const businessId = await myBusinessId(req.user.id);
     if (!businessId) return res.json({ success: true, products: [] });
     const { rows } = await query(
-      `SELECT id, name, description, price, emoji, photo_url, has_options, available, brand, weight_kg
+      `SELECT id, name, description, price, emoji, photo_url, has_options, available, brand, weight_kg, is_bestseller
        FROM menu_items WHERE business_id=$1 ORDER BY sort_order, name`,
       [businessId]);
     res.json({ success: true, products: rows, business_id: businessId });
@@ -383,6 +383,47 @@ router.post('/products/:id/toggle', requireRole('merchant'), async (req, res) =>
       [req.params.id, businessId]);
     if (!rows[0]) return res.status(403).json({ success: false, message: 'Not your product.' });
     res.json({ success: true, available: rows[0].available });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Toggle the "Best Seller" highlight on a food item.
+// Rules: food/bakery stores only, item must belong to this merchant, max 3 per store.
+const BESTSELLER_MAX = 3;
+router.post('/products/:id/bestseller', requireRole('merchant'), async (req, res) => {
+  try {
+    const businessId = await myBusinessId(req.user.id);
+    if (!businessId) return res.status(400).json({ success: false, message: 'No business found.' });
+
+    // Food/bakery only.
+    const { rows: biz } = await query(`SELECT category FROM businesses WHERE id=$1`, [businessId]);
+    if (!biz[0] || !['food', 'bakery'].includes(biz[0].category)) {
+      return res.status(400).json({ success: false, message: 'Best Sellers is available for food stores only.' });
+    }
+
+    // Item must be this merchant's.
+    const { rows: prod } = await query(
+      `SELECT is_bestseller FROM menu_items WHERE id=$1 AND business_id=$2`,
+      [req.params.id, businessId]);
+    if (!prod[0]) return res.status(403).json({ success: false, message: 'Not your product.' });
+
+    // Enforce the cap only when turning ON.
+    if (!prod[0].is_bestseller) {
+      const { rows: cnt } = await query(
+        `SELECT COUNT(*)::int AS n FROM menu_items WHERE business_id=$1 AND is_bestseller=TRUE`,
+        [businessId]);
+      if (cnt[0].n >= BESTSELLER_MAX) {
+        return res.status(400).json({
+          success: false,
+          message: `You can highlight up to ${BESTSELLER_MAX} Best Sellers. Turn one off first.`,
+        });
+      }
+    }
+
+    const { rows } = await query(
+      `UPDATE menu_items SET is_bestseller = NOT is_bestseller
+       WHERE id=$1 AND business_id=$2 RETURNING is_bestseller`,
+      [req.params.id, businessId]);
+    res.json({ success: true, is_bestseller: rows[0].is_bestseller });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 

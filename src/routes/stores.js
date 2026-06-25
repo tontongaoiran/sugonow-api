@@ -208,10 +208,10 @@ router.get('/:id', async (req, res) => {
 
     const { rows: products } = await query(
       `SELECT id, name, description, price, emoji, category, unit, stock,
-              photo_url, has_options
+              photo_url, has_options, is_bestseller
        FROM menu_items
        WHERE business_id=$1 AND stock > 0 AND COALESCE(available, TRUE) = TRUE
-       ORDER BY category, name`,
+       ORDER BY is_bestseller DESC, category, name`,
       [req.params.id]
     );
     res.json({ success: true, store: store[0], products });
