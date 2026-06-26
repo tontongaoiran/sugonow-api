@@ -261,7 +261,11 @@ router.patch('/fraud-flags/:id/resolve', async (req, res) => {
       );
       if (rows[0]?.driver_id) {
         await query(
-          `UPDATE driver_profiles SET status='suspended', is_online=FALSE WHERE user_id=$1`,
+          `UPDATE driver_profiles
+             SET status='suspended', suspended=TRUE, suspended_until=NULL,
+                 suspension_reason=COALESCE(suspension_reason, 'Suspended after fraud review'),
+                 is_online=FALSE
+           WHERE user_id=$1`,
           [rows[0].driver_id]
         );
       }

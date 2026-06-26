@@ -309,9 +309,10 @@ router.post('/users/:id/ban', async (req, res) => {
        RETURNING full_name, mobile, role`,
       [reason, message, req.params.id]);
     if (!rows[0]) return res.status(404).json({ success: false, message: 'User not found (admins cannot be banned).' });
-    // If a merchant is suspended, hide their store(s) immediately.
+    // If a merchant is suspended, hide their store(s) immediately (fully — not
+    // just "closed" — so it drops out of customer browse, matching store-suspend).
     if (rows[0].role === 'merchant') {
-      await query(`UPDATE businesses SET is_open=FALSE WHERE owner_id=$1`, [req.params.id]).catch(() => {});
+      await query(`UPDATE businesses SET is_open=FALSE, hidden=TRUE, merchant_status='suspended' WHERE owner_id=$1`, [req.params.id]).catch(() => {});
     }
     const durTxt = days > 0 ? ` for ${days} day(s)` : '';
     sendSms(rows[0].mobile,
@@ -328,7 +329,7 @@ router.post('/users/:id/unban', async (req, res) => {
       `UPDATE users SET banned=FALSE, ban_reason=NULL, ban_message=NULL, suspended_until=NULL WHERE id=$1
        RETURNING full_name, mobile, role`, [req.params.id]);
     if (rows[0]?.role === 'merchant') {
-      await query(`UPDATE businesses SET is_open=TRUE WHERE owner_id=$1`, [req.params.id]).catch(() => {});
+      await query(`UPDATE businesses SET is_open=TRUE, hidden=FALSE, merchant_status='approved' WHERE owner_id=$1`, [req.params.id]).catch(() => {});
     }
     if (!rows[0]) return res.status(404).json({ success: false, message: 'User not found.' });
     sendSms(rows[0].mobile,
