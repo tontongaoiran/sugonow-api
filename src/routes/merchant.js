@@ -260,7 +260,7 @@ router.get('/products', requireRole('merchant'), async (req, res) => {
     if (!businessId) return res.json({ success: true, products: [] });
     const { rows } = await query(
       `SELECT mi.id, mi.name, mi.description, mi.price, mi.emoji, mi.photo_url, mi.has_options,
-              mi.available, mi.brand, mi.weight_kg, mi.is_bestseller,
+              mi.available, mi.brand, mi.weight_kg, mi.is_bestseller, mi.category,
               COALESCE(s.sold_30d, 0) AS sold_30d
        FROM menu_items mi
        LEFT JOIN (
@@ -351,7 +351,7 @@ router.patch('/products/:id', requireRole('merchant'), async (req, res) => {
       `SELECT id FROM menu_items WHERE id=$1 AND business_id=$2`, [req.params.id, businessId]);
     if (!own[0]) return res.status(403).json({ success: false, message: 'Not your product.' });
 
-    const { name, description, base_price, available, photo_base64, photo_url, brand, weight_kg } = req.body;
+    const { name, description, base_price, available, photo_base64, photo_url, brand, weight_kg, category } = req.body;
     const photo = resolvePhoto(photo_base64, photo_url);
     await query(
       `UPDATE menu_items SET
@@ -361,12 +361,14 @@ router.patch('/products/:id', requireRole('merchant'), async (req, res) => {
          available = COALESCE($4, available),
          photo_url = COALESCE($5, photo_url),
          brand = COALESCE($7, brand),
-         weight_kg = COALESCE($8, weight_kg)
+         weight_kg = COALESCE($8, weight_kg),
+         category = COALESCE($9, category)
        WHERE id=$6`,
       [name ?? null, description ?? null,
        base_price != null ? parseFloat(base_price) : null,
        available, photo, req.params.id,
-       brand ?? null, weight_kg != null ? parseFloat(weight_kg) : null]);
+       brand ?? null, weight_kg != null ? parseFloat(weight_kg) : null,
+       category ?? null]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
