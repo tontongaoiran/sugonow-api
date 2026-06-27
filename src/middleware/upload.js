@@ -7,7 +7,10 @@ const path   = require('path');
 const fs     = require('fs');
 
 // Ensure uploads folder exists
-const uploadsDir = path.join(__dirname, '../../uploads');
+// Must match server.js's UPLOADS_DIR exactly, or files get SAVED to one folder
+// and SERVED from another (every photo 404s). On Railway, set UPLOADS_DIR to a
+// persistent volume mount (e.g. /data/uploads) so uploads survive redeploys.
+const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
 const storage = multer.diskStorage({
