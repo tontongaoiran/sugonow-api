@@ -48,6 +48,19 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(UPLOADS_DIR));
 
+// Images stored in Postgres (driver docs, proofs, product photos) are served
+// here. Survives redeploys with no volume needed.
+const { query: mediaQuery } = require('./src/db/pool');
+app.get('/media/:id', async (req, res) => {
+  try {
+    const { rows } = await mediaQuery('SELECT mime, data FROM media WHERE id = $1', [req.params.id]);
+    if (!rows[0]) return res.status(404).send('Not found');
+    res.set('Content-Type', rows[0].mime || 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.send(rows[0].data);
+  } catch (e) { return res.status(500).send('Error'); }
+});
+
 // ── Web Admin Panel (desktop, opens in Chrome) ──────────────────────────────
 // Open  http://localhost:3000/admin  (or your hosted URL + /admin).
 // Same-origin as the API, so it calls /api/v1/admin/* with no CORS issues.

@@ -16,6 +16,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { query } = require('../db/pool');
+const { saveMediaBase64 } = require('../utils/media');
 const { logError } = require('../services/errorLogService');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { sendSms, sendNotificationSms } = require('../services/smsService');
@@ -43,19 +44,9 @@ router.use(authenticate);
 
 // ── Photo helpers (same mechanism as the admin catalog) ──
 const UPLOAD_DIR = path.join(process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads'), 'products');
-function saveBase64Image(base64) {
-  try {
-    if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-    const m = base64.match(/^data:image\/(\w+);base64,(.+)$/);
-    let ext = 'jpg', data = base64;
-    if (m) { ext = m[1] === 'jpeg' ? 'jpg' : m[1]; data = m[2]; }
-    const fname = `mprod_${Date.now()}_${Math.round(Math.random()*1e6)}.${ext}`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, fname), Buffer.from(data, 'base64'));
-    return `/uploads/products/${fname}`;
-  } catch { return null; }
-}
-function resolvePhoto(photo_base64, photo_url) {
-  if (photo_base64 && photo_base64.startsWith('data:image')) return saveBase64Image(photo_base64);
+async function saveBase64Image(base64) { return saveMediaBase64(base64); }
+async function resolvePhoto(photo_base64, photo_url) {
+  if (photo_base64 && photo_base64.startsWith('data:image')) return saveMediaBase64(photo_base64);
   if (photo_url && /^https?:\/\//i.test(photo_url)) return photo_url;
   return null;
 }
@@ -297,7 +288,7 @@ router.post('/products', requireRole('merchant'), async (req, res) => {
     if (!name || base_price == null) {
       return res.status(400).json({ success: false, message: 'Name and price are required.' });
     }
-    const photo = resolvePhoto(photo_base64, photo_url);
+    const photo = await resolvePhoto(photo_base64, photo_url);
     // Keep only well-formed groups: named, with at least one named choice
     const groups = (Array.isArray(option_groups) ? option_groups : [])
       .map(g => ({
@@ -352,7 +343,7 @@ router.patch('/products/:id', requireRole('merchant'), async (req, res) => {
     if (!own[0]) return res.status(403).json({ success: false, message: 'Not your product.' });
 
     const { name, description, base_price, available, photo_base64, photo_url, brand, weight_kg, category } = req.body;
-    const photo = resolvePhoto(photo_base64, photo_url);
+    const photo = await resolvePhoto(photo_base64, photo_url);
     await query(
       `UPDATE menu_items SET
          name = COALESCE($1, name),
@@ -570,7 +561,7 @@ router.post('/brand-photo', requireRole('merchant'), async (req, res) => {
   try {
     const businessId = await myBusinessId(req.user.id);
     if (!businessId) return res.status(400).json({ success: false, message: 'No business found.' });
-    const photo = resolvePhoto(req.body.photo_base64, req.body.photo_url);
+    const photo = await resolvePhoto(req.body.photo_base64, req.body.photo_url);
     if (!photo) return res.status(400).json({ success: false, message: 'A photo is required.' });
     await query(`UPDATE businesses SET banner_url=$1 WHERE id=$2`, [photo, businessId]);
     res.json({ success: true, banner_url: photo });
@@ -716,7 +707,7 @@ router.post('/fees/pay', requireRole('merchant'), async (req, res) => {
       return res.status(409).json({ success: false,
         message: 'You already have a payment awaiting admin confirmation. Please wait for it first.' });
     }
-    const receipt = resolvePhoto(receipt_base64, receipt_url);  // optional screenshot
+    const receipt = await resolvePhoto(receipt_base64, receipt_url);  // optional screenshot
     await query(
       `INSERT INTO merchant_fee_payment_requests (business_id, amount, method, gcash_ref, receipt_url, status)
        VALUES ($1,$2,$3,$4,$5,'pending')`,

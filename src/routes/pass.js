@@ -12,6 +12,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { query } = require('../db/pool');
+const { saveMediaBase64 } = require('../utils/media');
 const { authenticate, requireRole } = require('../middleware/auth');
 const {
   getSettings, getPassStatus, purchasePass, confirmPass, getDriverLedger,
@@ -21,17 +22,10 @@ const router = express.Router();
 
 // Save a base64 payment screenshot to /uploads/payments, return its URL
 const PROOF_DIR = path.join(process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads'), 'payments');
-function savePaymentProof(base64) {
-  try {
-    if (!base64 || !base64.startsWith('data:image')) return null;
-    if (!fs.existsSync(PROOF_DIR)) fs.mkdirSync(PROOF_DIR, { recursive: true });
-    const m = base64.match(/^data:image\/(\w+);base64,(.+)$/);
-    let ext = 'jpg', data = base64;
-    if (m) { ext = m[1] === 'jpeg' ? 'jpg' : m[1]; data = m[2]; }
-    const fname = `pass_${Date.now()}_${Math.round(Math.random()*1e6)}.${ext}`;
-    fs.writeFileSync(path.join(PROOF_DIR, fname), Buffer.from(data, 'base64'));
-    return `/uploads/payments/${fname}`;
-  } catch { return null; }
+async function savePaymentProof(base64) {
+  // Proof screenshots now persist in Postgres (no disk volume needed).
+  if (!base64 || !base64.startsWith('data:image')) return null;
+  return saveMediaBase64(base64);
 }
 
 // ── CUSTOMER: view pass status + price ───────────────────────────────────────
@@ -68,7 +62,7 @@ router.post('/buy', authenticate, async (req, res) => {
     if ((payment_method || '').toLowerCase() === 'gcash' && !(gcash_ref && String(gcash_ref).trim())) {
       return res.status(400).json({ success: false, message: 'Please enter your GCash reference number.' });
     }
-    const proofUrl = savePaymentProof(proof_base64);
+    const proofUrl = await savePaymentProof(proof_base64);
     const result = await purchasePass(req.user.id, payment_method,
       gcash_ref ? String(gcash_ref).trim() : null, proofUrl);
     if (result.status === 'active') {

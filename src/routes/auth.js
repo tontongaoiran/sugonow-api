@@ -16,6 +16,7 @@ const jwt     = require('jsonwebtoken');
 const { query, withTransaction } = require('../db/pool');
 const { customerUpload, driverUpload,
         handleUploadError, fileUrl } = require('../middleware/upload');
+const { saveMediaBuffer, saveMediaBase64 } = require('../utils/media');
 const { sendSms, sendPrioritySms } = require('../services/smsService');
 const { normalizePhone } = require('../utils/phone');
 const { authenticate } = require('../middleware/auth');
@@ -26,17 +27,9 @@ const router    = express.Router();
 // (Registration uses multer; in-app photo changes send base64, like the other
 // screenshot uploads in the app.)
 const PROFILE_DIR = path.join(process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads'), 'profiles');
-function saveProfilePhoto(base64) {
-  try {
-    if (!base64 || !base64.startsWith('data:image')) return null;
-    if (!fs.existsSync(PROFILE_DIR)) fs.mkdirSync(PROFILE_DIR, { recursive: true });
-    const m = base64.match(/^data:image\/(\w+);base64,(.+)$/);
-    let ext = 'jpg', data = base64;
-    if (m) { ext = m[1] === 'jpeg' ? 'jpg' : m[1]; data = m[2]; }
-    const fname = `profile_${Date.now()}_${Math.round(Math.random()*1e6)}.${ext}`;
-    fs.writeFileSync(path.join(PROFILE_DIR, fname), Buffer.from(data, 'base64'));
-    return `/uploads/profiles/${fname}`;
-  } catch { return null; }
+async function saveProfilePhoto(base64) {
+  // Profile photos now persist in Postgres (no disk volume needed).
+  return saveMediaBase64(base64);
 }
 const TEST_MODE = process.env.TEST_MODE === 'true';
 
@@ -279,7 +272,7 @@ router.post('/register-customer',
       const passwordHash = await bcrypt.hash(password, 12);
 
       const profilePhoto = req.files?.profile_photo?.[0];
-      const profileUrl   = profilePhoto ? fileUrl(profilePhoto.filename) : null;
+      const profileUrl   = profilePhoto ? await saveMediaBuffer(profilePhoto.buffer, profilePhoto.mimetype) : null;
 
       const { rows } = await query(
         `INSERT INTO users
@@ -389,6 +382,12 @@ router.post('/register-driver',
       const zoneId       = zoneRow.rows[0]?.id || null;
       const passwordHash = await bcrypt.hash(password, 12);
 
+      // Store driver photos in Postgres (survive redeploys) -> /media/<id> URLs.
+      const photoUrl   = await saveMediaBuffer(photo.buffer,   photo.mimetype);
+      const idFrontUrl = await saveMediaBuffer(idFront.buffer, idFront.mimetype);
+      const idBackUrl  = await saveMediaBuffer(idBack.buffer,  idBack.mimetype);
+      const selfieUrl  = await saveMediaBuffer(selfie.buffer,  selfie.mimetype);
+
       await withTransaction(async (client) => {
         const { rows: uRows } = await client.query(
           `INSERT INTO users
@@ -398,7 +397,7 @@ router.post('/register-driver',
            RETURNING id`,
           [
             full_name.trim(), mobile.trim(), passwordHash,
-            zoneId, barangay || null, fileUrl(photo.filename),
+            zoneId, barangay || null, photoUrl,
           ]
         );
         const userId = uRows[0].id;
@@ -412,8 +411,8 @@ router.post('/register-driver',
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending',$11,$12,$13)`,
           [
             userId, plate_no.toUpperCase().trim(), id_type,
-            fileUrl(idFront.filename), fileUrl(idBack.filename), fileUrl(selfie.filename),
-            vehicle_type, vehicle_color, vehicle_model, fileUrl(photo.filename),
+            idFrontUrl, idBackUrl, selfieUrl,
+            vehicle_type, vehicle_color, vehicle_model, photoUrl,
             reg_lat ? parseFloat(reg_lat) : null,
             reg_lng ? parseFloat(reg_lng) : null,
             (reg_address || '').trim().slice(0, 200) || null,
@@ -487,7 +486,7 @@ router.post('/register-merchant',
       const passwordHash = await bcrypt.hash(password, 12);
 
       const photo = req.files?.profile_photo?.[0];
-      const photoUrl = photo ? fileUrl(photo.filename) : null;
+      const photoUrl = photo ? await saveMediaBuffer(photo.buffer, photo.mimetype) : null;
 
       await withTransaction(async (client) => {
         const { rows: uRows } = await client.query(
@@ -696,7 +695,7 @@ router.patch('/me', authenticate, async (req, res) => {
     if (email != null) { vals.push(email.trim() || null); sets.push(`email=$${vals.length}`); }
     let newPhotoUrl = null;
     if (profile_photo_base64) {
-      newPhotoUrl = saveProfilePhoto(profile_photo_base64);
+      newPhotoUrl = await saveProfilePhoto(profile_photo_base64);
       if (!newPhotoUrl) return res.status(400).json({ success: false, message: 'Could not save the photo. Please try another image.' });
       vals.push(newPhotoUrl); sets.push(`profile_photo=$${vals.length}`);
     }

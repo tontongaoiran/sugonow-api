@@ -16,6 +16,7 @@ const express = require('express');
 const fs   = require('fs');
 const path = require('path');
 const { query } = require('../db/pool');
+const { saveMediaBase64 } = require('../utils/media');
 const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -24,22 +25,11 @@ const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'products');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // Save a base64 image, return its public path. Returns null on failure.
-function saveBase64Image(base64, hint = 'prod') {
-  try {
-    const m = base64.match(/^data:image\/(\w+);base64,(.+)$/);
-    let ext = 'jpg', data = base64;
-    if (m) { ext = m[1] === 'jpeg' ? 'jpg' : m[1]; data = m[2]; }
-    const fname = `${hint}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, fname), Buffer.from(data, 'base64'));
-    return `/uploads/products/${fname}`;
-  } catch { return null; }
-}
+async function saveBase64Image(base64) { return saveMediaBase64(base64); }
 
 // Resolve incoming photo input (base64 OR url OR nothing) to a stored value
-function resolvePhoto(photo_base64, photo_url) {
-  if (photo_base64 && photo_base64.startsWith('data:image')) {
-    return saveBase64Image(photo_base64);
-  }
+async function resolvePhoto(photo_base64, photo_url) {
+  if (photo_base64 && photo_base64.startsWith('data:image')) return saveMediaBase64(photo_base64);
   if (photo_url && /^https?:\/\//i.test(photo_url)) return photo_url;
   return null;
 }
@@ -58,7 +48,7 @@ router.post('/admin/products', async (req, res) => {
     if (!business_id || !name || base_price == null) {
       return res.status(400).json({ success: false, message: 'business_id, name, base_price required.' });
     }
-    const photo = resolvePhoto(photo_base64, photo_url);
+    const photo = await resolvePhoto(photo_base64, photo_url);
 
     const { rows } = await query(
       `INSERT INTO menu_items
@@ -103,7 +93,7 @@ router.post('/admin/products', async (req, res) => {
 router.patch('/admin/products/:id', async (req, res) => {
   try {
     const { name, description, base_price, available, photo_base64, photo_url } = req.body;
-    const photo = resolvePhoto(photo_base64, photo_url);
+    const photo = await resolvePhoto(photo_base64, photo_url);
     await query(
       `UPDATE menu_items SET
          name = COALESCE($1, name),

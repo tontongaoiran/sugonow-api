@@ -4,22 +4,11 @@
  */
 const multer = require('multer');
 const path   = require('path');
-const fs     = require('fs');
 
-// Ensure uploads folder exists
-// Must match server.js's UPLOADS_DIR exactly, or files get SAVED to one folder
-// and SERVED from another (every photo 404s). On Railway, set UPLOADS_DIR to a
-// persistent volume mount (e.g. /data/uploads) so uploads survive redeploys.
-const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '../../uploads');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename:    (req, file, cb) => {
-    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, `${file.fieldname}-${unique}${path.extname(file.originalname)}`);
-  },
-});
+// Memory storage: uploaded files arrive as buffers (file.buffer) and are saved
+// into Postgres via utils/media.js, so photos persist across redeploys with no
+// disk volume. (Was diskStorage, which lost files on every Railway redeploy.)
+const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
   if (file.mimetype.startsWith('image/')) cb(null, true);

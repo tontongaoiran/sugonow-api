@@ -9,6 +9,7 @@
  */
 const express = require('express');
 const { query, withTransaction } = require('../db/pool');
+const { saveMediaBase64 } = require('../utils/media');
 const { authenticate, requireRole, requireVerifiedDriver } = require('../middleware/auth');
 const { calculateFare, isFirstBooking, splitFare, getCommissionRate } = require('../services/fareService');
 const { checkLocationAllowed, checkDeliveryDestination } = require('../services/locationService');
@@ -660,14 +661,11 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
     // driver can show it at the store. Save it and stamp the URL on the booking.
     if (custom_photo && typeof custom_photo === 'string' && custom_photo.startsWith('data:image')) {
       try {
-        const fs = require('fs'); const path = require('path');
-        const dir = path.join(process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads'), 'custom');
-        fs.mkdirSync(dir, { recursive: true });
-        const data = custom_photo.replace(/^data:image\/\w+;base64,/, '');
-        const fname = 'custom_' + booking.id + '_' + Date.now() + '.jpg';
-        fs.writeFileSync(path.join(dir, fname), Buffer.from(data, 'base64'));
-        await query(`UPDATE bookings SET custom_photo_url=$1 WHERE id=$2`,
-          ['/uploads/custom/' + fname, booking.id]);
+        const mediaUrl = await saveMediaBase64(custom_photo);
+        if (mediaUrl) {
+          await query(`UPDATE bookings SET custom_photo_url=$1 WHERE id=$2`,
+            [mediaUrl, booking.id]);
+        }
       } catch (e) { logError('customPhotoSave', e); }
     }
 
