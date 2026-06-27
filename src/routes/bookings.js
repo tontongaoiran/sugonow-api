@@ -1484,6 +1484,15 @@ router.get('/active', authenticate, requireVerifiedDriver, async (req, res) => {
         [booking.id]
       );
       booking.order_items = items;
+      // Product cost the driver fronts at the store (food/store orders): sum of
+      // the items they'll actually buy — excludes removed / unavailable /
+      // substituted-original rows. Computed live from the current items, so it
+      // reflects the latest total after any add / remove / substitute.
+      booking.products_total = Math.round(
+        items
+          .filter(i => i.status === 'ok' || i.status == null)
+          .reduce((sum, i) => sum + parseFloat(i.unit_price || 0) * (i.quantity || 0), 0)
+      );
       // ── Cash the driver should physically collect ──
       // = fare + LPG product cost + booking fee  −  any SugoNow credit the
       //   customer already applied. SugoNow reimburses the credit portion to the
