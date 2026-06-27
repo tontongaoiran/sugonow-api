@@ -14,7 +14,7 @@ const { logError } = require('./errorLogService');
 const { sendSms, sendNotificationSms } = require('./smsService');
 const { sendPush } = require('./pushNotificationService');
 
-const DISPATCH_TIMEOUT_SEC = 20;   // how long a batch has to respond
+const DISPATCH_TIMEOUT_SEC = 60;   // how long a batch has to respond
 const DISPATCH_BATCH_SIZE  = 3;    // drivers notified per batch
 
 /**
