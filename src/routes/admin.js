@@ -188,6 +188,39 @@ router.get('/bookings', async (req, res) => {
   }
 });
 
+// ─── GET /admin/missed-bookings ──────────────────────────────────────────────
+// Bookings that did NOT get fulfilled, so you can see what you're losing and why.
+// "no_driver" = dispatch ran out of drivers / auto-expired with nobody assigned —
+// the signal that you need more drivers or different on-duty hours.
+router.get('/missed-bookings', async (req, res) => {
+  try {
+    const { limit = 100 } = req.query;
+    const { rows } = await query(
+      `SELECT b.id, b.service_type, b.status, b.payment_method,
+              b.estimated_fare, b.final_fare, b.pickup_address, b.dropoff_address,
+              b.created_at, b.updated_at, b.dispatch_exhausted, b.driver_id,
+              uc.full_name AS customer_name, uc.mobile AS customer_mobile,
+              ud.full_name AS driver_name,
+              CASE
+                WHEN b.dispatch_exhausted = TRUE AND b.driver_id IS NULL THEN 'no_driver'
+                WHEN b.driver_id IS NOT NULL THEN 'cancelled_after_assign'
+                ELSE 'cancelled_before_dispatch'
+              END AS miss_reason
+       FROM bookings b
+       JOIN users uc ON uc.id = b.customer_id
+       LEFT JOIN users ud ON ud.id = b.driver_id
+       WHERE b.status = 'cancelled'
+       ORDER BY b.created_at DESC
+       LIMIT $1`,
+      [parseInt(limit)]
+    );
+    const noDriver = rows.filter(r => r.miss_reason === 'no_driver').length;
+    res.json({ success: true, bookings: rows, total: rows.length, no_driver_count: noDriver });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ─── GET /admin/bonds — DEPRECATED: now returns wallet info ──────────────────
 // The bond model was replaced by the pre-paid wallet. This endpoint is kept for
 // backward compatibility but now reports each driver's wallet balance instead.
