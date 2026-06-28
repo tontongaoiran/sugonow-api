@@ -249,24 +249,45 @@ async function getMilestoneProgress(driverId) {
 
 // Comprehensive driver dashboard stats: earnings, counts, rating, bonuses
 async function getDriverStats(driverId) {
-  // Earnings = sum of (final_fare - 15% commission) for completed, paid trips.
-  // We compute the driver's net using 85% of final_fare for simplicity/consistency.
+  // Net = the driver's ACTUAL earnings (fees only). For food/delivery the fare
+  // bundles in the product cost the driver merely FRONTED at the store, so we
+  // strip the products (live sum of order_items) to leave just the delivery fee.
+  // LPG/water/ride/custom fares are already fee-only. Commission is then applied
+  // at the current rate (0 during the launch promo). `gross` keeps the full
+  // amount handled, for reference.
+  const { rows: crRows } = await query(
+    `SELECT COALESCE(NULLIF(value,'')::numeric, 0) AS rate
+       FROM app_settings WHERE key='commission_rate' LIMIT 1`);
+  const commissionRate = crRows.length ? parseFloat(crRows[0].rate) : 0;
+
+  // Fee the driver keeps per booking, before commission (products stripped).
+  const feeExpr = `
+    (CASE
+       WHEN b.service_type IN ('food','delivery')
+         THEN GREATEST(0, b.final_fare - COALESCE((
+                SELECT SUM(oi.unit_price * oi.quantity)
+                  FROM order_items oi
+                 WHERE oi.booking_id = b.id AND (oi.status = 'ok' OR oi.status IS NULL)
+              ), 0))
+       ELSE b.final_fare
+     END)`;
+
   const periods = {
-    today: "completed_at::date = (NOW() AT TIME ZONE 'Asia/Manila')::date",
-    week:  "completed_at >= date_trunc('week', NOW() AT TIME ZONE 'Asia/Manila')",
-    month: "completed_at >= date_trunc('month', NOW() AT TIME ZONE 'Asia/Manila')",
+    today: "b.completed_at::date = (NOW() AT TIME ZONE 'Asia/Manila')::date",
+    week:  "b.completed_at >= date_trunc('week', NOW() AT TIME ZONE 'Asia/Manila')",
+    month: "b.completed_at >= date_trunc('month', NOW() AT TIME ZONE 'Asia/Manila')",
   };
   const out = {};
   for (const [k, cond] of Object.entries(periods)) {
     const { rows } = await query(
       `SELECT COUNT(*)::int AS trips,
-              COALESCE(SUM(final_fare),0) AS gross,
-              COALESCE(SUM(final_fare * 0.85),0) AS net,
-              COUNT(*) FILTER (WHERE service_type='ride')::int AS rides,
-              COUNT(*) FILTER (WHERE service_type IN ('delivery','food','exchange','custom','water'))::int AS deliveries
-       FROM bookings
-       WHERE driver_id=$1 AND status='completed' AND ${cond}`,
-      [driverId]);
+              COALESCE(SUM(b.final_fare),0) AS gross,
+              COALESCE(SUM(${feeExpr} * (1 - $2)),0) AS net,
+              COUNT(*) FILTER (WHERE b.service_type='ride')::int AS rides,
+              COUNT(*) FILTER (WHERE b.service_type IN ('delivery','food','exchange','custom','water'))::int AS deliveries
+       FROM bookings b
+       WHERE b.driver_id=$1 AND b.status='completed' AND ${cond}`,
+      [driverId, commissionRate]);
     out[k] = {
       trips: rows[0].trips,
       gross: Math.round(parseFloat(rows[0].gross)),
