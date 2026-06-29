@@ -977,6 +977,11 @@ async function renderMoney(){
       <input id="fc-km2" type="number" value="${fcfg?.km2??15}"></div>
     <div class="field"><label>3rd km onward, each (₱)</label>
       <input id="fc-kmn" type="number" value="${fcfg?.kmN??20}"></div>
+    <div class="field"><label>Product fee — on/off</label>
+      <select id="fc-pactive">
+        <option value="true" ${fcfg?.productActive===false?'':'selected'}>On (charge the %)</option>
+        <option value="false" ${fcfg?.productActive===false?'selected':''}>Off (no product fee)</option>
+      </select></div>
     <div class="field"><label>Product fee % (food/water/custom)</label>
       <input id="fc-pct" type="number" value="${fcfg?.productPct??5}"></div>
     <div class="field"><label>Custom errand cap (₱ max from %)</label>
@@ -1032,6 +1037,7 @@ async function saveFareCfg(){ try{ await post('/admin/farecfg-settings',{
     kmN:parseFloat(document.getElementById('fc-kmn').value),
     product_fee_pct:parseFloat(document.getElementById('fc-pct').value),
     product_fee_cap_custom:parseFloat(document.getElementById('fc-cap').value),
+    product_fee_active:document.getElementById('fc-pactive').value==='true',
     use_road_distance:document.getElementById('fc-road').value==='true'}); toast('Tiered fares saved'); }catch(e){ toast(e.message); } }
 async function saveDeliveryFares(){ try{ await post('/admin/delivery-fares',{
     food:parseFloat(document.getElementById('m-fare-food').value),
