@@ -12,6 +12,7 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const { sendSms } = require('../services/smsService');
 const G = require('../services/growthService');
 const { cooldownSettings, _bustCooldownCache } = require('./bookings');
+const { getFareConfig, bustFareConfigCache } = require('../services/fareService');
 
 const DELIVERY_BONUS = 5; // ₱ per completed delivery (Month 1-2 launch promo)
 
@@ -446,6 +447,41 @@ router.post('/milestone-settings', async (req, res) => {
       if (rowCount === 0) await query(`INSERT INTO app_settings (key, value) VALUES ($2, $1)`, [String(v), k]);
     }
     res.json({ success: true, message: `Weekly incentive set: ₱${amount} for ${trips} trips. Announce it to drivers!` });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ─── Fare config: tiered per-km + product handling fee (admin-editable) ─────
+// Tiered distance: 1st km = fare_km1, 2nd km = fare_km2, 3rd km onward = fare_kmN.
+// product_fee_pct = % of product price added to delivery fee (food/water/custom).
+// product_fee_cap_custom = peso cap on that % for custom errands only.
+// fare_use_road_distance = use Google driving distance ('true') vs straight line.
+router.get('/farecfg-settings', async (req, res) => {
+  try { res.json({ success: true, ...(await getFareConfig()) }); }
+  catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/farecfg-settings', async (req, res) => {
+  try {
+    const km1 = parseFloat(req.body.km1), km2 = parseFloat(req.body.km2), kmN = parseFloat(req.body.kmN);
+    const pct = parseFloat(req.body.product_fee_pct);
+    const cap = parseFloat(req.body.product_fee_cap_custom);
+    const useRoad = req.body.use_road_distance !== false && req.body.use_road_distance !== 'false';
+    for (const [label, v] of [['1st km', km1], ['2nd km', km2], ['succeeding km', kmN]]) {
+      if (isNaN(v) || v < 0) return res.status(400).json({ success: false, message: `Enter a valid ${label} rate (₱0 or more).` });
+    }
+    if (isNaN(pct) || pct < 0 || pct > 100) return res.status(400).json({ success: false, message: 'Product fee % must be between 0 and 100.' });
+    if (isNaN(cap) || cap < 0) return res.status(400).json({ success: false, message: 'Custom cap must be ₱0 or more.' });
+    const pairs = [
+      ['fare_km1', km1], ['fare_km2', km2], ['fare_kmN', kmN],
+      ['product_fee_pct', pct], ['product_fee_cap_custom', cap],
+      ['fare_use_road_distance', useRoad ? 'true' : 'false'],
+    ];
+    for (const [k, v] of pairs) {
+      const { rowCount } = await query(`UPDATE app_settings SET value=$1 WHERE key=$2`, [String(v), k]);
+      if (rowCount === 0) await query(`INSERT INTO app_settings (key, value) VALUES ($2, $1)`, [String(v), k]);
+    }
+    bustFareConfigCache();
+    res.json({ success: true, message: `Fares updated: ₱${km1}/₱${km2}/₱${kmN} per km, ${pct}% product fee (custom capped ₱${cap}).` });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 

@@ -895,6 +895,7 @@ async function renderMoney(){
   try{ ep=await get('/admin/errand-premium'); }catch(e){}
   let cf=null; try{ cf=await get('/admin/cancel-fee'); }catch(e){}
   let df=null; try{ df=await get('/admin/delivery-fares'); }catch(e){}
+  let fcfg={}; try{ fcfg=await get('/admin/farecfg-settings'); }catch(e){}
   let gs={}; try{ gs=await get('/admin/gcash-settings'); }catch(e){}
   try{ const s=await get('/admin/surge'); sg=s.surge||s; }catch(e){}
   try{ const f=await get('/pass/admin/settings'); fs=f.settings||f||{}; }catch(e){}
@@ -968,6 +969,24 @@ async function renderMoney(){
       <input id="m-fare-perkm" type="number" value="${df?.per_km??8}">
       <button class="btn btn-green" onclick="saveDeliveryFares()">Save all fares</button></div>
     <div class="note">Tricycle ride base (₱${df?.ride_base??25}) is set in Zones. Per-km above is shared with rides.</div>
+    <div class="section">📍 Tiered per-km & product fee (NEW)</div>
+    <div class="note">Distance is billed per WHOLE km (rounded up) using the ACTUAL driving distance pickup→drop-off. The tiered rate replaces the flat per-km above for ALL rides & deliveries: 1st km, 2nd km, then every succeeding km. The product fee adds a % of the product price to the delivery fee for food/water/custom (custom is capped). Applies to NEW bookings within ~30s.</div>
+    <div class="field"><label>1st km (₱)</label>
+      <input id="fc-km1" type="number" value="${fcfg?.km1??10}"></div>
+    <div class="field"><label>2nd km (₱)</label>
+      <input id="fc-km2" type="number" value="${fcfg?.km2??15}"></div>
+    <div class="field"><label>3rd km onward, each (₱)</label>
+      <input id="fc-kmn" type="number" value="${fcfg?.kmN??20}"></div>
+    <div class="field"><label>Product fee % (food/water/custom)</label>
+      <input id="fc-pct" type="number" value="${fcfg?.productPct??5}"></div>
+    <div class="field"><label>Custom errand cap (₱ max from %)</label>
+      <input id="fc-cap" type="number" value="${fcfg?.productCapCustom??50}"></div>
+    <div class="field"><label>Use Google driving distance</label>
+      <select id="fc-road">
+        <option value="true" ${fcfg?.useRoad===false?'':'selected'}>On (accurate road distance)</option>
+        <option value="false" ${fcfg?.useRoad===false?'selected':''}>Off (straight-line)</option>
+      </select>
+      <button class="btn btn-green" onclick="saveFareCfg()">Save tiered fares</button></div>
     <div class="section">Custom cancellation fee</div>
     <div class="note">Charged to a customer who cancels a CUSTOM/pasabuy order AFTER the driver already bought the goods. Returnable goods = just this fee; non-returnable = goods price + this fee. Set 0 to turn off.</div>
     <div class="field"><label>Cancellation fee (₱)</label>
@@ -1007,6 +1026,13 @@ async function savePayment(){ try{ await post('/admin/gcash-settings',{
     toppick_price:parseFloat(document.getElementById('m-toppick').value)||300}); toast('Payment settings saved'); }catch(e){ toast(e.message); } }
 async function saveErrand(){ try{ await post('/admin/errand-premium',{errand_premium:parseFloat(document.getElementById('m-errand').value)}); toast('Errand fee saved'); }catch(e){ toast(e.message); } }
 async function saveCancelFee(){ try{ await post('/admin/cancel-fee',{cancel_fee:parseFloat(document.getElementById('m-cancelfee').value)}); toast('Cancellation fee saved'); }catch(e){ toast(e.message); } }
+async function saveFareCfg(){ try{ await post('/admin/farecfg-settings',{
+    km1:parseFloat(document.getElementById('fc-km1').value),
+    km2:parseFloat(document.getElementById('fc-km2').value),
+    kmN:parseFloat(document.getElementById('fc-kmn').value),
+    product_fee_pct:parseFloat(document.getElementById('fc-pct').value),
+    product_fee_cap_custom:parseFloat(document.getElementById('fc-cap').value),
+    use_road_distance:document.getElementById('fc-road').value==='true'}); toast('Tiered fares saved'); }catch(e){ toast(e.message); } }
 async function saveDeliveryFares(){ try{ await post('/admin/delivery-fares',{
     food:parseFloat(document.getElementById('m-fare-food').value),
     lpg:parseFloat(document.getElementById('m-fare-lpg').value),

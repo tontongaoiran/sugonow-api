@@ -219,6 +219,7 @@ router.get('/fare-estimate', async (req, res) => {
       stopover_lat, stopover_lng, stopover_wait_min,
       service_type = 'ride', zone = 'flora',
       passenger_count = 1, customer_id, container_count = 1, tank_count = 1,
+      products_total = 0,
       location_note,
     } = req.query;
 
@@ -243,6 +244,7 @@ router.get('/fare-estimate', async (req, res) => {
       surgeActive: surge.active, surgeMultiplier: surge.multiplier,
       containerCount: parseInt(container_count) || 1,
       tankCount: parseInt(tank_count) || 1,
+      productsTotal: parseFloat(products_total) || 0,
     });
 
     // First-booking promo preview (free ride OR free delivery, capped)
@@ -494,6 +496,7 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
       surgeActive: surge.active, surgeMultiplier: surge.multiplier,
       containerCount: container_count,
       tankCount: parseInt(tank_count) || 1,
+      productsTotal: Math.round(productsTotal),
     });
 
     // For store orders, the "delivery fee" is the distance-based fare from
