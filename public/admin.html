@@ -159,7 +159,12 @@ const TABS = [
 // ====================== HELPERS ======================
 const h = (s)=>({Authorization:'Bearer '+TOKEN});
 const peso = (n)=>'₱'+(parseFloat(n||0)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-const esc = (s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = (s)=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// jsq: safe for a value placed inside a single-quoted JS string in an inline
+// handler, e.g. onclick="fn('${jsq(name)}')". Backslash-escapes \ and ' for the
+// JS string, then HTML-escapes the rest so the attribute itself can't break.
+// Fixes store/driver names containing an apostrophe (e.g. "Lola's Store").
+const jsq = (s)=>String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),2200);}
 async function api(path, opts={}){
@@ -401,7 +406,7 @@ async function renderApprovals(){
           <td>${esc(m.category||'—')}</td>
           <td>${apprTab==='approved'?fee:'—'}</td>
           <td>${ apprTab==='pending' ?
-            `<button class="btn btn-green" onclick="approveMerchant('${m.id}','${esc(m.name)}')">✓ Approve</button>
+            `<button class="btn btn-green" onclick="approveMerchant('${m.id}','${jsq(m.name)}')">✓ Approve</button>
              <button class="btn btn-red" onclick="rejectMerchant('${m.id}')">✕ Reject</button>`
             : `<button class="btn btn-amber" onclick="suspendMerchant('${m.id}')">Suspend</button>` }
           </td></tr>`;
@@ -476,7 +481,7 @@ async function renderDrivers(){
       body.innerHTML = `<div class="note">Record a manual cash/GCash payout to a driver (e.g. earnings handed over).</div>`+
         (list.length?`<table><tr><th>Name</th><th>Mobile</th><th>Trips</th><th>Action</th></tr>`+
         list.map(d=>`<tr><td><b>${esc(d.full_name)}</b></td><td>${esc(d.mobile)}</td><td>${d.total_trips??0}</td>
-          <td><button class="btn btn-green" onclick="payoutDriver('${d.id}','${esc(d.full_name)}')">Record payout</button></td></tr>`).join('')+`</table>`
+          <td><button class="btn btn-green" onclick="payoutDriver('${d.id}','${jsq(d.full_name)}')">Record payout</button></td></tr>`).join('')+`</table>`
         :'<div class="empty">No drivers.</div>');
     }
   }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
@@ -497,7 +502,7 @@ function driverRow(d, pending){
     <td><span class="tag ${d.status==='verified'||d.status==='approved'?'tag-on':d.status==='pending'?'tag-busy':'tag-off'}">${esc(d.status||'—')}</span></td>
     <td>${peso(d.wallet_balance)}</td>
     <td><button class="btn btn-blue" onclick="driverDetail('${d.user_id||d.id}')">View</button>
-        <button class="btn btn-blue" onclick="driverWallet('${d.user_id||d.id}','${esc(d.full_name)}')">Wallet</button></td></tr>`;
+        <button class="btn btn-blue" onclick="driverWallet('${d.user_id||d.id}','${jsq(d.full_name)}')">Wallet</button></td></tr>`;
 }
 async function driverDetail(id){
   setContent('<div class="loading">Loading…</div>');
@@ -522,7 +527,7 @@ async function driverDetail(id){
       ${d.status==='pending'
         ? `<button class="btn btn-green" onclick="approveDriver('${d.user_id||d.id}')">✓ Approve</button>
            <button class="btn btn-red" onclick="rejectDriver('${d.user_id||d.id}')">✕ Reject</button>`
-        : `<button class="btn btn-blue" onclick="driverWallet('${d.user_id||d.id}','${esc(d.full_name)}')">Wallet</button>`}`);
+        : `<button class="btn btn-blue" onclick="driverWallet('${d.user_id||d.id}','${jsq(d.full_name)}')">Wallet</button>`}`);
   }catch(e){ setContent('<div class="empty">'+esc(e.message)+'</div>'); }
 }
 async function manageDriver(id, action){
@@ -560,12 +565,12 @@ async function driverWallet(id,name){
             <select id="w-dir"><option value="credit">+ Credit (add)</option><option value="debit">− Debit (remove)</option></select></div>
           <div class="field"><label>Amount (₱)</label><input id="w-amt" type="number" placeholder="e.g. 200"></div>
           <div class="field"><label>Reason</label><input id="w-reason" type="text" placeholder="e.g. GCash top-up ref 1234"></div>
-          <button class="btn btn-green" onclick="walletAdjust('${id}','${esc(name)}')">Save adjustment</button>
+          <button class="btn btn-green" onclick="walletAdjust('${id}','${jsq(name)}')">Save adjustment</button>
         </div>
         <div id="wt-pane-cashout" style="display:none">
           <div class="note">Record cash you handed to the driver from their wallet balance. This SUBTRACTS from the wallet (balance: ${peso(bal)}).</div>
           <div class="field"><label>Cash-out amount (₱)</label><input id="w-cashamt" type="number" placeholder="e.g. 500"></div>
-          <button class="btn btn-amber" onclick="walletCashout('${id}','${esc(name)}')">Record cash-out</button>
+          <button class="btn btn-amber" onclick="walletCashout('${id}','${jsq(name)}')">Record cash-out</button>
         </div>
       </div>
       <div id="wt-pane-history"><table><tr><th>Type</th><th>Amount</th><th>Note</th><th>When</th></tr>${rows||'<tr><td colspan=4 class=empty>No transactions.</td></tr>'}</table></div>`);
@@ -628,14 +633,14 @@ async function renderMerchants(){
             <td>${peso(b.fee_owed)}</td>
             <td>${b.is_featured?'<span class="tag tag-gold">⭐ Featured</span>':'<span class="note">—</span>'}</td>
             <td>
-              <button class="btn btn-blue" onclick="setMerchantFee('${b.id}','${esc(b.name)}')">Set fee</button>
-              <button class="btn btn-blue" onclick="changeCategory('${b.id}','${esc(b.name)}')">🏷 Category</button>
+              <button class="btn btn-blue" onclick="setMerchantFee('${b.id}','${jsq(b.name)}')">Set fee</button>
+              <button class="btn btn-blue" onclick="changeCategory('${b.id}','${jsq(b.name)}')">🏷 Category</button>
               ${b.is_featured
-                ? `<button class="btn btn-amber" onclick="merchantAction('${b.id}','unfeature','Unfeature '+'${esc(b.name)}'+'?')">Unfeature</button>`
-                : `<button class="btn btn-gold" onclick="featureMerchant('${b.id}','${esc(b.name)}')">Feature</button>`}
+                ? `<button class="btn btn-amber" onclick="merchantAction('${b.id}','unfeature','Unfeature '+'${jsq(b.name)}'+'?')">Unfeature</button>`
+                : `<button class="btn btn-gold" onclick="featureMerchant('${b.id}','${jsq(b.name)}')">Feature</button>`}
               ${susp
-                ? `<button class="btn btn-green" onclick="merchantAction('${b.id}','reactivate','Reactivate '+'${esc(b.name)}'+'?')">Reactivate</button>`
-                : `<button class="btn btn-red" onclick="merchantAction('${b.id}','suspend','Suspend '+'${esc(b.name)}'+'? Their store will be hidden.')">Suspend</button>`}
+                ? `<button class="btn btn-green" onclick="merchantAction('${b.id}','reactivate','Reactivate '+'${jsq(b.name)}'+'?')">Reactivate</button>`
+                : `<button class="btn btn-red" onclick="merchantAction('${b.id}','suspend','Suspend '+'${jsq(b.name)}'+'? Their store will be hidden.')">Suspend</button>`}
             </td></tr>`;
         }).join('')+`</table>`;
     } else if(merchantSub==='payments'){
@@ -738,7 +743,7 @@ async function renderCatalog(){
         <td>${owner}</td>
         <td>${status}</td>
         <td>${b.product_count} product${b.product_count===1?'':'s'}</td>
-        <td><button class="btn btn-blue" onclick='catalogProducts(${JSON.stringify(JSON.stringify({id:b.id,name:b.name}))})'>Products</button></td>
+        <td><button class="btn btn-blue" onclick="catalogProducts('${b.id}','${jsq(b.name)}')">Products</button></td>
       </tr>`;
     }).join('');
     setContent(`
@@ -773,8 +778,8 @@ async function addBiz(){
     toast('Business created'); renderCatalog();
   }catch(e){ toast(e.message); }
 }
-function catalogProducts(bizJson){
-  catalogView = { mode:'products', biz: JSON.parse(bizJson) };
+function catalogProducts(id, name){
+  catalogView = { mode:'products', biz: { id, name } };
   renderCatalog();
 }
 async function renderCatalogProducts(){
@@ -1230,7 +1235,7 @@ async function renderLandmarks(){
         <td><span class="tag ${l.status==='approved'?'tag-on':l.status==='pending'?'tag-busy':'tag-off'}">${esc(l.status)}</span></td>
         <td>${l.status!=='approved'?`<button class="btn btn-green" onclick="lmApprove('${l.id}')">✓</button>`:''}
             ${l.status==='pending'?`<button class="btn btn-amber" onclick="lmReject('${l.id}')">✕</button>`:''}
-            <button class="btn btn-red" onclick="lmDelete('${l.id}','${esc(l.name)}')">🗑</button></td></tr>`).join('')+`</table>`
+            <button class="btn btn-red" onclick="lmDelete('${l.id}','${jsq(l.name)}')">🗑</button></td></tr>`).join('')+`</table>`
       : '<div class="empty">No landmarks here.</div>';
   }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
 }
