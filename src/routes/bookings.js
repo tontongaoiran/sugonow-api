@@ -672,9 +672,14 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
       } catch (e) { logError('customPhotoSave', e); }
     }
 
-    // Apply wallet credit if the customer opted in (covers fee + fare)
+    // Apply wallet credit if the customer opted in. Option A: credit covers the
+    // FARE/DELIVERY portion the customer actually pays (post-voucher) + booking
+    // fee — NEVER the store products, so SugoNow doesn't subsidize merchant goods.
     if (use_wallet) {
-      const totalDue = parseFloat(booking.estimated_fare) + parseFloat(feeInfo.fee);
+      const farePortion = isStoreOrder
+        ? parseFloat(fareData.delivery_fee || 0)   // 0 if a free-delivery voucher already applied
+        : parseFloat(booking.estimated_fare);
+      const totalDue = farePortion + parseFloat(feeInfo.fee);
       const credit = await G.applicableCredit(req.user.id, totalDue);
       if (credit > 0) {
         await G.spendWallet(req.user.id, credit, booking.id,
