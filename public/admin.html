@@ -1197,10 +1197,19 @@ async function searchUsers(){
         return `<tr><td>${esc(u.full_name)}</td><td>${esc(u.mobile)}</td><td>${esc(u.role)}</td>
         <td>${u.banned?'<span class="tag tag-off">Banned</span>':'<span class="tag tag-on">Active</span>'}</td>
         <td>${feeCell}</td>
-        <td>${u.banned?`<button class="btn btn-green" onclick="userAction('${u.id}','unban')">Unban</button>`:`<button class="btn btn-amber" onclick="userAction('${u.id}','ban')">Ban</button>`}</td></tr>`;
+        <td>${u.banned?`<button class="btn btn-green" onclick="userAction('${u.id}','unban')">Unban</button>`:`<button class="btn btn-amber" onclick="userAction('${u.id}','ban')">Ban</button>`}${u.role==='customer'?` <button class="btn btn-gold" onclick="grantCredit('${u.id}','${jsq(u.full_name)}')">💳 Credit</button>`:''}</td></tr>`;
       }).join('')+`</table>`
       : '<div class="empty">No users found.</div>';
   }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+}
+async function grantCredit(id,name){
+  const amt = prompt('Grant how much credit to '+name+'? (₱)\n\nThis is spendable like cash on ANY service, including food products.','300');
+  if(amt===null) return;
+  const amount = parseFloat(amt);
+  if(isNaN(amount)||amount<=0){ toast('Enter a valid amount'); return; }
+  const message = prompt('Message to send '+name+' (shows as a push notification + in their wallet history):','Congratulations! You won \u20b1'+amount+' in the SugoNow lucky draw. \ud83c\udf89 Use it on any service, kasama ang pagkain!');
+  if(message===null) return;
+  try{ const r=await post('/admin/customer-wallet/'+id+'/grant',{amount, message}); toast(r.message||'Credit granted'); }catch(e){ toast(e.message); }
 }
 async function userAction(id,action){
   if(action==='unban'){ if(!confirm('Unban this user?'))return;

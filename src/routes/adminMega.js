@@ -10,6 +10,7 @@ const express = require('express');
 const { query } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { sendSms } = require('../services/smsService');
+const { sendPush } = require('../services/pushNotificationService');
 const G = require('../services/growthService');
 const { cooldownSettings, _bustCooldownCache } = require('./bookings');
 const { getFareConfig, bustFareConfigCache } = require('../services/fareService');
@@ -635,6 +636,34 @@ router.post('/driver-wallet/:driverId/cashout', async (req, res) => {
       message: `Cash-out of ₱${amt} recorded. New balance: ₱${parseFloat(nb[0].wallet_balance).toFixed(2)}.` });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
+
+// ─── ADMIN: grant wallet credit to a CUSTOMER (lucky-draw prizes, goodwill) ──
+// The credit spends like cash on ANY SugoNow service, including food PRODUCTS.
+// The custom message is saved as the wallet-transaction note (so it lives in the
+// customer's wallet history — their "inbox") AND pushed as a notification.
+// Settlement is automatic: when the customer spends it, the driver collects the
+// reduced cash and is reimbursed the credit into their wallet at completion.
+router.post('/customer-wallet/:customerId/grant', async (req, res) => {
+  try {
+    const amt = parseFloat(req.body.amount);
+    const message = (req.body.message || '').trim();
+    if (isNaN(amt) || amt <= 0)
+      return res.status(400).json({ success: false, message: 'Enter an amount greater than ₱0.' });
+    const { rows: u } = await query(
+      `SELECT id, full_name FROM users WHERE id=$1 AND role='customer'`, [req.params.customerId]);
+    if (!u[0]) return res.status(404).json({ success: false, message: 'Customer not found.' });
+    const note = message || `SugoNow credit: ₱${amt.toFixed(2)} — use on any service.`;
+    await G.addWalletCredit(req.params.customerId, amt, 'admin_grant', note);
+    try {
+      sendPush(req.params.customerId, '🎉 You received SugoNow credit!',
+        message || `You got ₱${amt.toFixed(2)} in credit — use it on any SugoNow service, kasama ang pagkain!`);
+    } catch (e) { /* push is best-effort */ }
+    const bal = await G.getWalletBalance(req.params.customerId);
+    res.json({ success: true, new_balance: bal,
+      message: `Granted ₱${amt.toFixed(2)} to ${u[0].full_name}. New balance: ₱${parseFloat(bal).toFixed(2)}.` });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 
 // ─── ADMIN: a driver's wallet transaction history ───────────────────────────
 router.get('/driver-wallet/:driverId/history', async (req, res) => {
