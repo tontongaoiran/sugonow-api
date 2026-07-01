@@ -465,6 +465,8 @@ router.post('/farecfg-settings', async (req, res) => {
     const km1 = parseFloat(req.body.km1), km2 = parseFloat(req.body.km2), kmN = parseFloat(req.body.kmN);
     const pct = parseFloat(req.body.product_fee_pct);
     const cap = parseFloat(req.body.product_fee_cap_custom);
+    const pickupPerKm = parseFloat(req.body.pickup_per_km);
+    const pickupCap = parseFloat(req.body.pickup_fee_cap);
     const useRoad = req.body.use_road_distance !== false && req.body.use_road_distance !== 'false';
     const productActive = req.body.product_fee_active !== false && req.body.product_fee_active !== 'false';
     for (const [label, v] of [['1st km', km1], ['2nd km', km2], ['succeeding km', kmN]]) {
@@ -472,18 +474,21 @@ router.post('/farecfg-settings', async (req, res) => {
     }
     if (isNaN(pct) || pct < 0 || pct > 100) return res.status(400).json({ success: false, message: 'Product fee % must be between 0 and 100.' });
     if (isNaN(cap) || cap < 0) return res.status(400).json({ success: false, message: 'Custom cap must be ₱0 or more.' });
+    if (isNaN(pickupPerKm) || pickupPerKm < 0) return res.status(400).json({ success: false, message: 'Pickup ₱/km must be ₱0 or more.' });
+    if (isNaN(pickupCap) || pickupCap < 0) return res.status(400).json({ success: false, message: 'Pickup fee cap must be ₱0 or more.' });
     const pairs = [
       ['fare_km1', km1], ['fare_km2', km2], ['fare_kmN', kmN],
       ['product_fee_pct', pct], ['product_fee_cap_custom', cap],
       ['product_fee_active', productActive ? 'true' : 'false'],
       ['fare_use_road_distance', useRoad ? 'true' : 'false'],
+      ['pickup_per_km', pickupPerKm], ['pickup_fee_cap', pickupCap],
     ];
     for (const [k, v] of pairs) {
       const { rowCount } = await query(`UPDATE app_settings SET value=$1 WHERE key=$2`, [String(v), k]);
       if (rowCount === 0) await query(`INSERT INTO app_settings (key, value) VALUES ($2, $1)`, [String(v), k]);
     }
     bustFareConfigCache();
-    res.json({ success: true, message: `Fares updated: ₱${km1}/₱${km2}/₱${kmN} per km, product fee ${productActive ? pct + '%' : 'OFF'}${productActive ? ` (custom capped ₱${cap})` : ''}.` });
+    res.json({ success: true, message: `Fares updated: ₱${km1}/₱${km2}/₱${kmN} per km, product fee ${productActive ? pct + '%' : 'OFF'}${productActive ? ` (custom capped ₱${cap})` : ''}, pickup ₱${pickupPerKm}/km (up to ₱${pickupCap}).` });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 

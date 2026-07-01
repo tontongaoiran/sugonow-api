@@ -969,11 +969,9 @@ async function renderMoney(){
     <div class="field"><label>Water refill base (₱)</label>
       <input id="m-fare-water" type="number" value="${df?.water??30}"></div>
     <div class="field"><label>Custom / pasabuy base (₱)</label>
-      <input id="m-fare-custom" type="number" value="${df?.custom??20}"></div>
-    <div class="field"><label>Per-km rate, all services (₱/km)</label>
-      <input id="m-fare-perkm" type="number" value="${df?.per_km??8}">
+      <input id="m-fare-custom" type="number" value="${df?.custom??20}">
       <button class="btn btn-green" onclick="saveDeliveryFares()">Save all fares</button></div>
-    <div class="note">Tricycle ride base (₱${df?.ride_base??25}) is set in Zones. Per-km above is shared with rides.</div>
+    <div class="note">Tricycle ride base (₱${df?.ride_base??25}) is set in Zones. Distance is billed using the tiered per-km rates below (the old flat per-km has been retired).</div>
     <div class="section">📍 Tiered per-km & product fee (NEW)</div>
     <div class="note">Distance is billed per WHOLE km (rounded up) using the ACTUAL driving distance pickup→drop-off. The tiered rate replaces the flat per-km above for ALL rides & deliveries: 1st km, 2nd km, then every succeeding km. The product fee adds a % of the product price to the delivery fee for food/water/custom (custom is capped). Applies to NEW bookings within ~30s.</div>
     <div class="field"><label>1st km (₱)</label>
@@ -995,8 +993,13 @@ async function renderMoney(){
       <select id="fc-road">
         <option value="true" ${fcfg?.useRoad===false?'':'selected'}>On (accurate road distance)</option>
         <option value="false" ${fcfg?.useRoad===false?'selected':''}>Off (straight-line)</option>
-      </select>
+      </select></div>
+    <div class="field"><label>Pickup fee — ₱/km (driver→store)</label>
+      <input id="fc-pickkm" type="number" value="${fcfg?.pickupPerKm??10}"></div>
+    <div class="field"><label>Pickup fee — cap (₱ max)</label>
+      <input id="fc-pickcap" type="number" value="${fcfg?.pickupCap??30}">
       <button class="btn btn-green" onclick="saveFareCfg()">Save tiered fares</button></div>
+    <div class="note">Pickup fee = driver's road distance to the store × ₱/km, capped. Near driver = small; far = up to the cap. Added when a driver is matched; customers see "up to ₱cap" before booking. This replaces the old straight-line × flat-rate pickup charge.</div>
     <div class="section">Custom cancellation fee</div>
     <div class="note">Charged to a customer who cancels a CUSTOM/pasabuy order AFTER the driver already bought the goods. Returnable goods = just this fee; non-returnable = goods price + this fee. Set 0 to turn off.</div>
     <div class="field"><label>Cancellation fee (₱)</label>
@@ -1043,13 +1046,14 @@ async function saveFareCfg(){ try{ await post('/admin/farecfg-settings',{
     product_fee_pct:parseFloat(document.getElementById('fc-pct').value),
     product_fee_cap_custom:parseFloat(document.getElementById('fc-cap').value),
     product_fee_active:document.getElementById('fc-pactive').value==='true',
-    use_road_distance:document.getElementById('fc-road').value==='true'}); toast('Tiered fares saved'); }catch(e){ toast(e.message); } }
+    use_road_distance:document.getElementById('fc-road').value==='true',
+    pickup_per_km:parseFloat(document.getElementById('fc-pickkm').value),
+    pickup_fee_cap:parseFloat(document.getElementById('fc-pickcap').value)}); toast('Tiered fares saved'); }catch(e){ toast(e.message); } }
 async function saveDeliveryFares(){ try{ await post('/admin/delivery-fares',{
     food:parseFloat(document.getElementById('m-fare-food').value),
     lpg:parseFloat(document.getElementById('m-fare-lpg').value),
     water:parseFloat(document.getElementById('m-fare-water').value),
-    custom:parseFloat(document.getElementById('m-fare-custom').value),
-    per_km:parseFloat(document.getElementById('m-fare-perkm').value)}); toast('Fares saved'); }catch(e){ toast(e.message); } }
+    custom:parseFloat(document.getElementById('m-fare-custom').value)}); toast('Fares saved'); }catch(e){ toast(e.message); } }
 async function saveStale(){ try{ await post('/admin/staleness-settings',{pending_expiry_min:parseFloat(document.getElementById('m-pend').value),driver_stale_min:parseFloat(document.getElementById('m-stale').value)}); toast('Auto-cleanup saved'); }catch(e){ toast(e.message); } }
 async function saveCooldown(){ try{ await post('/admin/cooldown-settings',{active:document.getElementById('cd-active').value==='true',soft_count:+document.getElementById('cd-sc').value,soft_hours:+document.getElementById('cd-sh').value,hard_count:+document.getElementById('cd-hc').value,hard_hours:+document.getElementById('cd-hh').value}); toast('Cooldown saved'); }catch(e){ toast(e.message); } }
 

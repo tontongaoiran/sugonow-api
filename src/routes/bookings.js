@@ -11,7 +11,7 @@ const express = require('express');
 const { query, withTransaction } = require('../db/pool');
 const { saveMediaBase64 } = require('../utils/media');
 const { authenticate, requireRole, requireVerifiedDriver } = require('../middleware/auth');
-const { calculateFare, isFirstBooking, splitFare, getCommissionRate } = require('../services/fareService');
+const { calculateFare, isFirstBooking, splitFare, getCommissionRate, getFareConfig, roadDistanceKm } = require('../services/fareService');
 const { checkLocationAllowed, checkDeliveryDestination } = require('../services/locationService');
 const { sendSms, sendNotificationSms } = require('../services/smsService');
 const { sendPush } = require('../services/pushNotificationService');
@@ -858,27 +858,24 @@ router.patch('/:id/accept', authenticate, requireVerifiedDriver, async (req, res
     );
 
     // ── Finalize fare: add the driver→pickup distance now that we know the driver ──
+    // Road distance × admin pickup rate, capped at the admin pickup cap (near = small,
+    // far = up to the cap). This capped pickup fare is ADDED to estimated_fare, so the
+    // commission base (getCommissionBase) automatically covers BOTH the pickup leg and
+    // the dropoff/trip leg the driver rides.
     let pickupFare = 0, pickupKm = 0;
     try {
-      // per_km_rate lives on the ZONE, not the booking — join through zone_id.
       const { rows: bk } = await query(
-        `SELECT b.pickup_lat, b.pickup_lng, b.estimated_fare, b.service_type,
-                COALESCE(z.per_km_rate, 8) AS per_km_rate
-         FROM bookings b LEFT JOIN zones z ON z.id = b.zone_id
-         WHERE b.id=$1`,
-        [rows[0].id]);
+        `SELECT pickup_lat, pickup_lng, estimated_fare, service_type
+         FROM bookings WHERE id=$1`, [rows[0].id]);
       const drv = dRows[0];
       if (bk[0] && drv?.current_lat && drv?.current_lng) {
-        const haversineKm = (la1,lo1,la2,lo2) => {
-          const R=6371, toRad=d=>d*Math.PI/180;
-          const dLa=toRad(la2-la1), dLo=toRad(lo2-lo1);
-          const a=Math.sin(dLa/2)**2+Math.cos(toRad(la1))*Math.cos(toRad(la2))*Math.sin(dLo/2)**2;
-          return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-        };
-        const rate = parseFloat(bk[0].per_km_rate ?? 8) || 8;
-        pickupKm = haversineKm(parseFloat(drv.current_lat), parseFloat(drv.current_lng),
-                               parseFloat(bk[0].pickup_lat), parseFloat(bk[0].pickup_lng));
-        pickupFare = Math.round(pickupKm * rate);
+        const fc = await getFareConfig();
+        pickupKm = await roadDistanceKm(
+          parseFloat(drv.current_lat), parseFloat(drv.current_lng),
+          parseFloat(bk[0].pickup_lat), parseFloat(bk[0].pickup_lng),
+          null, null, fc.useRoad);
+        // Proportional so a nearby driver adds almost nothing; capped so it never balloons.
+        pickupFare = Math.min(fc.pickupCap, Math.round(pickupKm * fc.pickupPerKm));
         await query(
           `UPDATE bookings SET pickup_distance_km=$1, pickup_distance_fare=$2,
              estimated_fare = estimated_fare + $2, fare_finalized=TRUE

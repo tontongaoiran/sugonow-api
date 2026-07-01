@@ -32,12 +32,13 @@ const GOOGLE_KEY = process.env.GOOGLE_MAPS_API_KEY;
 let _fcCache = { v: null, t: 0 };
 async function getFareConfig() {
   if (_fcCache.v && Date.now() - _fcCache.t < 30000) return _fcCache.v;
-  const cfg = { km1: 10, km2: 15, kmN: 20, productPct: 5, productCapCustom: 50, productActive: true, useRoad: true };
+  const cfg = { km1: 10, km2: 15, kmN: 20, productPct: 5, productCapCustom: 50, productActive: true, useRoad: true, pickupPerKm: 10, pickupCap: 30 };
   try {
     const { rows } = await query(
       `SELECT key, value FROM app_settings
        WHERE key IN ('fare_km1','fare_km2','fare_kmN','product_fee_pct',
-                     'product_fee_cap_custom','product_fee_active','fare_use_road_distance')`);
+                     'product_fee_cap_custom','product_fee_active','fare_use_road_distance',
+                     'pickup_per_km','pickup_fee_cap')`);
     const m = Object.fromEntries(rows.map(r => [r.key, r.value]));
     if (m.fare_km1 != null && !isNaN(parseFloat(m.fare_km1))) cfg.km1 = parseFloat(m.fare_km1);
     if (m.fare_km2 != null && !isNaN(parseFloat(m.fare_km2))) cfg.km2 = parseFloat(m.fare_km2);
@@ -46,6 +47,8 @@ async function getFareConfig() {
     if (m.product_fee_cap_custom != null && !isNaN(parseFloat(m.product_fee_cap_custom))) cfg.productCapCustom = parseFloat(m.product_fee_cap_custom);
     if (m.product_fee_active != null) cfg.productActive = String(m.product_fee_active) !== 'false';
     if (m.fare_use_road_distance != null) cfg.useRoad = String(m.fare_use_road_distance) !== 'false';
+    if (m.pickup_per_km != null && !isNaN(parseFloat(m.pickup_per_km))) cfg.pickupPerKm = parseFloat(m.pickup_per_km);
+    if (m.pickup_fee_cap != null && !isNaN(parseFloat(m.pickup_fee_cap))) cfg.pickupCap = parseFloat(m.pickup_fee_cap);
   } catch (e) { /* defaults */ }
   _fcCache = { v: cfg, t: Date.now() };
   return cfg;
@@ -269,6 +272,7 @@ const calculateFare = async ({
     passenger_count:    passengers,
     pickup_distance_km: Math.round(pickupDistKm * 100) / 100,
     pickup_distance_fare: pickupCharge,
+    pickup_fee_cap:     fc.pickupCap,
     trip_distance_km:   Math.round(tripDistKm   * 100) / 100,
     total_distance_km:  Math.round(tripDistKm   * 100) / 100,
     distance_charge:    Math.round(distanceCharge),
@@ -318,5 +322,5 @@ const splitFare = (totalFare, rate = 0.15) => ({
 module.exports = {
   calculateFare, isFirstBooking, splitFare, getCommissionRate,
   haversineKm, getZoneFare, STOPOVER_RATE_PER_MIN,
-  getFareConfig, bustFareConfigCache,
+  getFareConfig, bustFareConfigCache, roadDistanceKm,
 };
