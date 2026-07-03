@@ -14,8 +14,28 @@ const { logError } = require('./errorLogService');
 const { sendSms, sendNotificationSms } = require('./smsService');
 const { sendPush } = require('./pushNotificationService');
 
-const DISPATCH_TIMEOUT_SEC = 60;   // how long a batch has to respond
+const DISPATCH_TIMEOUT_SEC = 30;   // fallback; live value from app_settings.dispatch_timeout_sec
 const DISPATCH_BATCH_SIZE  = 3;    // drivers notified per batch
+
+// ── Admin-tunable timings (cached 30s) ──────────────────────────────────────
+// dispatch_timeout_sec: seconds a batch has to accept before rolling over (def 30)
+// pending_expiry_min:   minutes a booking keeps searching before it gives up (def 3)
+let _dtCache = { v: 30, t: 0 };
+async function getDispatchTimeoutSec() {
+  if (Date.now() - _dtCache.t < 30000) return _dtCache.v;
+  try {
+    const { rows } = await query(`SELECT value FROM app_settings WHERE key='dispatch_timeout_sec' LIMIT 1`);
+    const v = rows.length && parseFloat(rows[0].value) > 0 ? parseFloat(rows[0].value) : 30;
+    _dtCache = { v, t: Date.now() }; return v;
+  } catch { return 30; }
+}
+async function getGiveUpMin() {
+  try {
+    const { rows } = await query(`SELECT value FROM app_settings WHERE key='pending_expiry_min' LIMIT 1`);
+    const v = rows.length && parseFloat(rows[0].value) >= 0 ? parseFloat(rows[0].value) : 3;
+    return v;  // 0 = never give up
+  } catch { return 3; }
+}
 
 /**
  * Get ordered list of eligible drivers nearest to a point.
@@ -57,6 +77,7 @@ const getNearestDrivers = async (zoneId, originLat, originLng, limit = 10, eligi
  * Notify a single driver and record the dispatch attempt
  */
 const notifyDriver = async (booking, driver, serviceLabel) => {
+  const secs = await getDispatchTimeoutSec();
   await query(
     `INSERT INTO dispatch_attempts (booking_id, driver_id, status)
      VALUES ($1, $2, 'notified')`,
@@ -64,10 +85,10 @@ const notifyDriver = async (booking, driver, serviceLabel) => {
   );
   sendNotificationSms(driver.mobile,
     `SugoNow: New ${serviceLabel}! ₱${booking.estimated_fare}. ` +
-    `You have ${DISPATCH_TIMEOUT_SEC} seconds to accept in the app.`
+    `You have ${secs} seconds to accept in the app.`
   ).catch(() => {});
   sendPush(driver.id, `🛺 New ${serviceLabel}!`,
-    `₱${booking.estimated_fare} · ${DISPATCH_TIMEOUT_SEC} seconds to accept`,
+    `₱${booking.estimated_fare} · ${secs} seconds to accept`,
     { type: 'new_booking', bookingId: booking.id }
   ).catch(() => {});
   console.log(`  📨 Notified ${driver.full_name} for booking ${booking.id.slice(0,8)}`);
@@ -105,11 +126,13 @@ const startDispatch = async (booking, zoneId, originLat, originLng, serviceLabel
  * keeps the "first to accept wins" lock intact while moving in groups of 3.
  */
 const processExpiredDispatches = async () => {
+  const secs = await getDispatchTimeoutSec();
+  const giveUpMin = await getGiveUpMin();
   // 1. Expire any attempts past the timeout
   const { rows: expired } = await query(
     `UPDATE dispatch_attempts SET status='expired', responded_at=NOW()
      WHERE status='notified'
-       AND notified_at < NOW() - INTERVAL '${DISPATCH_TIMEOUT_SEC} seconds'
+       AND notified_at < NOW() - INTERVAL '${Number(secs)} seconds'
      RETURNING booking_id`
   );
   if (expired.length === 0) return 0;
@@ -163,12 +186,47 @@ const processExpiredDispatches = async () => {
       }
       console.log(`  🔄 Rolled booking ${bk[0].id.slice(0,8)} to next batch of ${nextDrivers.length}`);
     } else {
-      // No untried drivers left — mark the booking so the customer can be told.
-      await query(
-        `UPDATE bookings SET dispatch_exhausted=TRUE WHERE id=$1 AND status='pending'`,
-        [bk[0].id]
-      ).catch(() => {});
-      console.log(`  ⏳ No more drivers for booking ${bk[0].id.slice(0,8)} (exhausted)`);
+      // Every online driver in range has already been tried this round. As long as
+      // the booking is still inside the give-up window, DON'T give up — start a
+      // fresh round: clear its attempts so all online drivers become "untried"
+      // again and re-notify the nearest batch. This keeps re-pinging every cycle.
+      const { rows: onlineCnt } = await query(
+        `SELECT COUNT(*)::int AS n FROM driver_profiles dp
+           JOIN users u ON u.id=dp.user_id
+          WHERE dp.is_online=TRUE AND dp.status='verified' AND dp.is_locked=FALSE
+            AND dp.current_lat IS NOT NULL AND COALESCE(dp.suspended,FALSE)=FALSE
+            AND u.deleted_at IS NULL AND COALESCE(u.banned,FALSE)=FALSE
+            AND COALESCE(dp.wallet_balance,0)>0 AND u.zone_id=$1`, [bk[0].zone_id]);
+      const withinWindow = (!(giveUpMin > 0)) ||
+        (await query(`SELECT (created_at > NOW() - ($1||' minutes')::interval) AS ok
+                      FROM bookings WHERE id=$2`, [String(giveUpMin), bk[0].id])).rows[0]?.ok;
+      if (parseInt(onlineCnt[0].n) > 0 && withinWindow) {
+        // Fresh round: wipe attempts, re-notify nearest batch, keep the flag OFF.
+        await query(`DELETE FROM dispatch_attempts WHERE booking_id=$1`, [bk[0].id]);
+        const { rows: freshBatch } = await query(
+          `SELECT u.id, u.mobile, u.full_name FROM driver_profiles dp
+             JOIN users u ON u.id=dp.user_id
+            WHERE dp.is_online=TRUE AND dp.status='verified' AND dp.is_locked=FALSE
+              AND dp.current_lat IS NOT NULL AND COALESCE(dp.suspended,FALSE)=FALSE
+              AND u.deleted_at IS NULL AND COALESCE(u.banned,FALSE)=FALSE
+              AND COALESCE(dp.wallet_balance,0)>0 AND u.zone_id=$1
+              AND ($4='any' OR TRIM(LOWER(COALESCE(dp.vehicle_type,'tricycle')))=TRIM(LOWER($4)))
+            ORDER BY (POWER(dp.current_lat-$2,2)+POWER(dp.current_lng-$3,2)) ASC
+            LIMIT ${DISPATCH_BATCH_SIZE}`,
+          [bk[0].zone_id, bk[0].pickup_lat, bk[0].pickup_lng, bk[0].eligible_vehicle]);
+        const label = bk[0].service_type === 'delivery' ? 'delivery order' : 'ride';
+        for (const d of freshBatch) await notifyDriver({ id: bk[0].id, estimated_fare: bk[0].estimated_fare }, d, label);
+        await query(`UPDATE bookings SET dispatch_exhausted=FALSE WHERE id=$1`, [bk[0].id]).catch(() => {});
+        console.log(`  🔁 Re-pinged ${freshBatch.length} online driver(s) for booking ${bk[0].id.slice(0,8)} (fresh round)`);
+      } else {
+        // Truly nobody online (or past the give-up window) — flag so the revive
+        // loop pings the next driver who comes online.
+        await query(
+          `UPDATE bookings SET dispatch_exhausted=TRUE WHERE id=$1 AND status='pending'`,
+          [bk[0].id]
+        ).catch(() => {});
+        console.log(`  ⏳ No online drivers for booking ${bk[0].id.slice(0,8)} (waiting for one to come online)`);
+      }
     }
   }
   return expired.length;
@@ -179,13 +237,17 @@ const processExpiredDispatches = async () => {
  * come online. Notifies a fresh batch and clears the exhausted flag.
  */
 const retryExhaustedBookings = async () => {
+  const giveUpMin = await getGiveUpMin();
+  const windowClause = giveUpMin > 0
+    ? `AND created_at > NOW() - INTERVAL '${Number(giveUpMin)} minutes'`
+    : '';   // 0 = keep trying indefinitely
   const { rows: stuck } = await query(
     `SELECT id, zone_id, pickup_lat, pickup_lng, estimated_fare, service_type,
             COALESCE(eligible_vehicle, 'any') AS eligible_vehicle
      FROM bookings
      WHERE status='pending' AND driver_id IS NULL
        AND dispatch_exhausted=TRUE
-       AND created_at > NOW() - INTERVAL '15 minutes'`  // give up after 15 min
+       ${windowClause}`
   );
   for (const b of stuck) {
     const { rows: nextDrivers } = await query(
@@ -226,9 +288,9 @@ const retryExhaustedBookings = async () => {
 async function expireStaleBookings() {
   try {
     const { rows: cfg } = await query(
-      `SELECT COALESCE(NULLIF(value,'')::numeric, 12) AS m
+      `SELECT COALESCE(NULLIF(value,'')::numeric, 3) AS m
        FROM app_settings WHERE key='pending_expiry_min' LIMIT 1`);
-    const mins = cfg.length ? parseFloat(cfg[0].m) : 12;
+    const mins = cfg.length ? parseFloat(cfg[0].m) : 3;
     if (!(mins > 0)) return;  // 0/blank disables auto-expiry
     const { rows } = await query(
       `UPDATE bookings SET status='cancelled', updated_at=NOW()

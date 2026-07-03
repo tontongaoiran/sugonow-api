@@ -835,7 +835,8 @@ router.patch('/:id/accept', authenticate, requireVerifiedDriver, async (req, res
     }
 
     const { rows } = await query(
-      `UPDATE bookings SET driver_id=$1, status='accepted', updated_at=NOW()
+      `UPDATE bookings SET driver_id=$1, status='accepted', updated_at=NOW(),
+              dispatch_exhausted=FALSE
        WHERE id=$2 AND status='pending' AND driver_id IS NULL
        RETURNING id, customer_id, service_type`,
       [req.user.id, req.params.id]

@@ -776,27 +776,31 @@ router.get('/staleness-settings', async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT key, value FROM app_settings
-       WHERE key IN ('pending_expiry_min','driver_stale_min')`);
+       WHERE key IN ('pending_expiry_min','driver_stale_min','dispatch_timeout_sec')`);
     const kv = Object.fromEntries(rows.map(r => [r.key, parseFloat(r.value)]));
     res.json({ success: true,
-      pending_expiry_min: kv.pending_expiry_min != null ? kv.pending_expiry_min : 12,
-      driver_stale_min:   kv.driver_stale_min   != null ? kv.driver_stale_min   : 5 });
+      pending_expiry_min: kv.pending_expiry_min != null ? kv.pending_expiry_min : 3,
+      driver_stale_min:   kv.driver_stale_min   != null ? kv.driver_stale_min   : 5,
+      dispatch_timeout_sec: kv.dispatch_timeout_sec != null ? kv.dispatch_timeout_sec : 30 });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 router.post('/staleness-settings', async (req, res) => {
   try {
     const pe = req.body.pending_expiry_min === '' || req.body.pending_expiry_min == null
-      ? 12 : parseFloat(req.body.pending_expiry_min);
+      ? 3 : parseFloat(req.body.pending_expiry_min);
     const ds = req.body.driver_stale_min === '' || req.body.driver_stale_min == null
       ? 5 : parseFloat(req.body.driver_stale_min);
+    const dt = req.body.dispatch_timeout_sec === '' || req.body.dispatch_timeout_sec == null
+      ? 30 : parseFloat(req.body.dispatch_timeout_sec);
     if (pe < 0 || ds < 0) return res.status(400).json({ success: false, message: 'Minutes cannot be negative (0 = off).' });
-    for (const [k, v] of [['pending_expiry_min', pe], ['driver_stale_min', ds]]) {
+    if (!(dt > 0)) return res.status(400).json({ success: false, message: 'Dispatch timeout must be greater than 0 seconds.' });
+    for (const [k, v] of [['pending_expiry_min', pe], ['driver_stale_min', ds], ['dispatch_timeout_sec', dt]]) {
       const { rowCount } = await query(`UPDATE app_settings SET value=$1 WHERE key=$2`, [String(v), k]);
       if (rowCount === 0) await query(`INSERT INTO app_settings (key, value) VALUES ($2, $1)`, [String(v), k]);
     }
     res.json({ success: true, message:
-      `Bookings auto-expire after ${pe || 'OFF'} min; drivers auto-offline after ${ds || 'OFF'} min.` });
+      `Riders get ${dt}s to accept; bookings give up after ${pe || 'OFF'} min; drivers auto-offline after ${ds || 'OFF'} min.` });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 

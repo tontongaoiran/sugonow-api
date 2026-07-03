@@ -1007,8 +1007,10 @@ async function renderMoney(){
       <button class="btn btn-green" onclick="saveCancelFee()">Save</button></div>
     <div class="section">🧹 Auto-cleanup (live ops hygiene)</div>
     <div class="note">A booking nobody accepts auto-cancels; a driver who closed the app is auto-offlined. Set 0 to disable.</div>
-    <div class="field"><label>Auto-cancel unaccepted bookings (min)</label>
-      <input id="m-pend" type="number" value="${st.pending_expiry_min??12}"></div>
+    <div class="field"><label>Rider accept window — rollover (sec)</label>
+      <input id="m-dispatch" type="number" value="${st.dispatch_timeout_sec??30}"></div>
+    <div class="field"><label>Auto-cancel unaccepted bookings — give up (min)</label>
+      <input id="m-pend" type="number" value="${st.pending_expiry_min??3}"></div>
     <div class="field"><label>Auto-offline silent drivers (min)</label>
       <input id="m-stale" type="number" value="${st.driver_stale_min??5}">
       <button class="btn btn-green" onclick="saveStale()">Save</button></div>
@@ -1054,7 +1056,7 @@ async function saveDeliveryFares(){ try{ await post('/admin/delivery-fares',{
     lpg:parseFloat(document.getElementById('m-fare-lpg').value),
     water:parseFloat(document.getElementById('m-fare-water').value),
     custom:parseFloat(document.getElementById('m-fare-custom').value)}); toast('Fares saved'); }catch(e){ toast(e.message); } }
-async function saveStale(){ try{ await post('/admin/staleness-settings',{pending_expiry_min:parseFloat(document.getElementById('m-pend').value),driver_stale_min:parseFloat(document.getElementById('m-stale').value)}); toast('Auto-cleanup saved'); }catch(e){ toast(e.message); } }
+async function saveStale(){ try{ await post('/admin/staleness-settings',{dispatch_timeout_sec:parseFloat(document.getElementById('m-dispatch').value),pending_expiry_min:parseFloat(document.getElementById('m-pend').value),driver_stale_min:parseFloat(document.getElementById('m-stale').value)}); toast('Auto-cleanup saved'); }catch(e){ toast(e.message); } }
 async function saveCooldown(){ try{ await post('/admin/cooldown-settings',{active:document.getElementById('cd-active').value==='true',soft_count:+document.getElementById('cd-sc').value,soft_hours:+document.getElementById('cd-sh').value,hard_count:+document.getElementById('cd-hc').value,hard_hours:+document.getElementById('cd-hh').value}); toast('Cooldown saved'); }catch(e){ toast(e.message); } }
 
 // ====================== GROWTH & WALLETS ======================
