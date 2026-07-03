@@ -61,12 +61,38 @@ async function getReceiptByBooking(bookingId) {
     `SELECT * FROM receipts WHERE booking_id = $1 ORDER BY issued_at DESC LIMIT 1`,
     [bookingId]
   );
-  return rows[0] || null;
+  const receipt = rows[0];
+  if (!receipt) return null;
+  // Enrich at READ time (no migration): pull the itemized order lines and the
+  // newer money fields (pickup fee, wallet credit) straight from the immutable
+  // booking/order records so the customer gets a complete breakdown.
+  const { rows: b } = await query(
+    `SELECT b.service_type, b.pickup_distance_fare, b.wallet_credit_used,
+            b.created_at, u.full_name AS driver_name
+       FROM bookings b LEFT JOIN users u ON u.id = b.driver_id
+      WHERE b.id = $1`, [bookingId]);
+  const { rows: items } = await query(
+    `SELECT product_name, quantity, unit_price,
+            (unit_price * quantity) AS line_total, options_text
+       FROM order_items WHERE booking_id = $1 ORDER BY id`, [bookingId]);
+  const products_subtotal = items.reduce(
+    (s, i) => s + (parseFloat(i.unit_price) || 0) * (parseInt(i.quantity) || 1), 0);
+  return {
+    ...receipt,
+    service_type:         b[0]?.service_type || receipt.service_type || null,
+    driver_name:          b[0]?.driver_name || null,
+    pickup_distance_fare: parseFloat(b[0]?.pickup_distance_fare || 0),
+    wallet_credit_used:   parseFloat(b[0]?.wallet_credit_used || 0),
+    items,
+    products_subtotal,
+  };
 }
 
 async function getCustomerReceipts(customerId, limit = 50) {
   const { rows } = await query(
-    `SELECT * FROM receipts WHERE customer_id = $1 ORDER BY issued_at DESC LIMIT $2`,
+    `SELECT r.*, b.service_type
+       FROM receipts r LEFT JOIN bookings b ON b.id = r.booking_id
+      WHERE r.customer_id = $1 ORDER BY r.issued_at DESC LIMIT $2`,
     [customerId, limit]
   );
   return rows;
