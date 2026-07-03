@@ -843,10 +843,17 @@ router.patch('/:id/accept', authenticate, requireVerifiedDriver, async (req, res
     );
     if (!rows[0]) return res.status(400).json({ success: false, message: 'Booking no longer available.' });
 
-    // Mark dispatch accepted
+    // Mark THIS driver's attempt accepted, and retire every OTHER outstanding
+    // attempt for this booking so the dispatch loop has nothing left to expire or
+    // re-ping. This is what stops booking notifications firing after acceptance.
     await query(
       `UPDATE dispatch_attempts SET status='accepted', responded_at=NOW()
        WHERE booking_id=$1 AND driver_id=$2`,
+      [req.params.id, req.user.id]
+    );
+    await query(
+      `UPDATE dispatch_attempts SET status='cancelled', responded_at=NOW()
+       WHERE booking_id=$1 AND driver_id<>$2 AND status='notified'`,
       [req.params.id, req.user.id]
     );
 

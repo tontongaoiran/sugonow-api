@@ -215,6 +215,10 @@ const processExpiredDispatches = async () => {
             LIMIT ${DISPATCH_BATCH_SIZE}`,
           [bk[0].zone_id, bk[0].pickup_lat, bk[0].pickup_lng, bk[0].eligible_vehicle]);
         const label = bk[0].service_type === 'delivery' ? 'delivery order' : 'ride';
+        // Race guard: a driver may have accepted while we were querying above.
+        const { rows: sp } = await query(
+          `SELECT 1 FROM bookings WHERE id=$1 AND status='pending' AND driver_id IS NULL`, [bk[0].id]);
+        if (!sp[0]) continue;   // already taken — do not re-ping
         for (const d of freshBatch) await notifyDriver({ id: bk[0].id, estimated_fare: bk[0].estimated_fare }, d, label);
         await query(`UPDATE bookings SET dispatch_exhausted=FALSE WHERE id=$1`, [bk[0].id]).catch(() => {});
         console.log(`  🔁 Re-pinged ${freshBatch.length} online driver(s) for booking ${bk[0].id.slice(0,8)} (fresh round)`);
@@ -269,6 +273,9 @@ const retryExhaustedBookings = async () => {
     );
     if (nextDrivers.length > 0) {
       const label = b.service_type === 'delivery' ? 'delivery order' : 'ride';
+      const { rows: sp } = await query(
+        `SELECT 1 FROM bookings WHERE id=$1 AND status='pending' AND driver_id IS NULL`, [b.id]);
+      if (!sp[0]) continue;   // accepted meanwhile — skip
       for (const d of nextDrivers) {
         await notifyDriver({ id: b.id, estimated_fare: b.estimated_fare }, d, label);
       }
