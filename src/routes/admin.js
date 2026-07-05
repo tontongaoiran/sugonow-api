@@ -172,9 +172,14 @@ router.get('/bookings', async (req, res) => {
       `SELECT b.id, b.service_type, b.status, b.payment_method,
               b.estimated_fare, b.final_fare, b.pickup_address,
               b.dropoff_address, b.passenger_count, b.discount_amount,
-              b.fraud_flag, b.created_at, b.completed_at,
+              b.fraud_flag, b.created_at, b.completed_at, b.unlisted_store,
               uc.full_name AS customer_name,
-              ud.full_name AS driver_name
+              ud.full_name AS driver_name,
+              (SELECT bz.name FROM order_items oi
+                 JOIN menu_items mi ON mi.id = oi.product_id
+                 JOIN businesses bz ON bz.id = mi.business_id
+                WHERE oi.booking_id = b.id AND bz.owner_id IS NOT NULL
+                LIMIT 1) AS merchant_name
        FROM bookings b
        JOIN users uc ON uc.id = b.customer_id
        LEFT JOIN users ud ON ud.id = b.driver_id
@@ -183,39 +188,6 @@ router.get('/bookings', async (req, res) => {
       [status || null, parseInt(limit)]
     );
     res.json({ success: true, bookings: rows, total: rows.length });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// ─── GET /admin/missed-bookings ──────────────────────────────────────────────
-// Bookings that did NOT get fulfilled, so you can see what you're losing and why.
-// "no_driver" = dispatch ran out of drivers / auto-expired with nobody assigned —
-// the signal that you need more drivers or different on-duty hours.
-router.get('/missed-bookings', async (req, res) => {
-  try {
-    const { limit = 100 } = req.query;
-    const { rows } = await query(
-      `SELECT b.id, b.service_type, b.status, b.payment_method,
-              b.estimated_fare, b.final_fare, b.pickup_address, b.dropoff_address,
-              b.created_at, b.updated_at, b.dispatch_exhausted, b.driver_id,
-              uc.full_name AS customer_name, uc.mobile AS customer_mobile,
-              ud.full_name AS driver_name,
-              CASE
-                WHEN b.dispatch_exhausted = TRUE AND b.driver_id IS NULL THEN 'no_driver'
-                WHEN b.driver_id IS NOT NULL THEN 'cancelled_after_assign'
-                ELSE 'cancelled_before_dispatch'
-              END AS miss_reason
-       FROM bookings b
-       JOIN users uc ON uc.id = b.customer_id
-       LEFT JOIN users ud ON ud.id = b.driver_id
-       WHERE b.status = 'cancelled'
-       ORDER BY b.created_at DESC
-       LIMIT $1`,
-      [parseInt(limit)]
-    );
-    const noDriver = rows.filter(r => r.miss_reason === 'no_driver').length;
-    res.json({ success: true, bookings: rows, total: rows.length, no_driver_count: noDriver });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -294,11 +266,7 @@ router.patch('/fraud-flags/:id/resolve', async (req, res) => {
       );
       if (rows[0]?.driver_id) {
         await query(
-          `UPDATE driver_profiles
-             SET status='suspended', suspended=TRUE, suspended_until=NULL,
-                 suspension_reason=COALESCE(suspension_reason, 'Suspended after fraud review'),
-                 is_online=FALSE
-           WHERE user_id=$1`,
+          `UPDATE driver_profiles SET status='suspended', is_online=FALSE WHERE user_id=$1`,
           [rows[0].driver_id]
         );
       }

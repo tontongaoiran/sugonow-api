@@ -839,10 +839,18 @@ async function renderBookings(){
       return;
     }
     const r = await get('/admin/bookings'); const list = r.bookings||[];
-    body.innerHTML = list.length? `<table><tr><th>When</th><th>Service</th><th>Customer</th><th>Driver</th><th>Fare</th><th>Status</th></tr>`+
+    const whereOf = (b)=>{
+      const st=b.service_type;
+      if(st==='food'||st==='delivery') return b.merchant_name||b.pickup_address||'—';
+      if(st==='ride') return b.dropoff_address||'—';
+      if(st==='exchange'||st==='water'||st==='custom') return b.unlisted_store||b.pickup_address||'—';
+      return b.dropoff_address||b.pickup_address||'—';
+    };
+    body.innerHTML = list.length? `<table><tr><th>When</th><th>Service</th><th>Merchant / Destination</th><th>Customer</th><th>Driver</th><th>Fare</th><th>Status</th></tr>`+
       list.slice(0,200).map(b=>`<tr>
         <td>${b.created_at?new Date(b.created_at).toLocaleString():'—'}</td>
         <td>${esc(b.service_type||'—')}</td>
+        <td>${esc(whereOf(b))}</td>
         <td>${esc(b.customer_name||'—')}</td>
         <td>${esc(b.driver_name||'—')}</td>
         <td>${peso(b.final_fare||b.estimated_fare)}</td>
