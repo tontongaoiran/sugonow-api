@@ -231,7 +231,7 @@ router.get('/fare-estimate', async (req, res) => {
 
     const surge = await getSurge();
 
-    const fare = await calculateFare({
+    const fareArgs = {
       pickupLat: parseFloat(pickup_lat), pickupLng: parseFloat(pickup_lng),
       dropLat: drop_lat ? parseFloat(drop_lat) : null,
       dropLng: drop_lng ? parseFloat(drop_lng) : null,
@@ -240,13 +240,28 @@ router.get('/fare-estimate', async (req, res) => {
       stopoverWaitMin: parseInt(stopover_wait_min) || 0,
       serviceType: service_type, zone,
       passengerCount: parseInt(passenger_count) || 1,
-      vehicleClass: String(vehicle_pref).toLowerCase() === 'car' ? 'car' : 'standard',
       isFirstBooking: firstBooking,
       surgeActive: surge.active, surgeMultiplier: surge.multiplier,
       containerCount: parseInt(container_count) || 1,
       tankCount: parseInt(tank_count) || 1,
       productsTotal: parseFloat(products_total) || 0,
-    });
+    };
+    const prefClass = String(vehicle_pref).toLowerCase() === 'car' ? 'car' : 'standard';
+    const fare = await calculateFare({ ...fareArgs, vehicleClass: prefClass });
+
+    // For rides, price EVERY vehicle so the app can show all prices at once and
+    // switching chips is instant. Motorcycle & tricycle share the standard fare;
+    // car uses its own base + ₱/km. (Same distance, so just a second pricing pass.)
+    let ride_prices = null;
+    if (service_type === 'ride') {
+      const std = (prefClass === 'standard') ? fare : await calculateFare({ ...fareArgs, vehicleClass: 'standard' });
+      const car = (prefClass === 'car')      ? fare : await calculateFare({ ...fareArgs, vehicleClass: 'car' });
+      ride_prices = {
+        motorcycle: std.total_fare,
+        tricycle:   std.total_fare,
+        car:        car.total_fare,
+      };
+    }
 
     // First-booking promo preview (free ride OR free delivery, capped)
     let promo = null;
@@ -277,6 +292,7 @@ router.get('/fare-estimate', async (req, res) => {
     const creditApplicable = Math.min(walletBalance, totalWithFee);
 
     res.json({ success: true, ...fare, is_first_booking: firstBooking,
+               ride_prices,
                surge_label: surge.active ? surge.label : null, promo,
                booking_fee: bookingFee.fee,
                booking_fee_waived: bookingFee.waived,
