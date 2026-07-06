@@ -219,7 +219,7 @@ router.get('/fare-estimate', async (req, res) => {
       stopover_lat, stopover_lng, stopover_wait_min,
       service_type = 'ride', zone = 'flora',
       passenger_count = 1, customer_id, container_count = 1, tank_count = 1,
-      products_total = 0,
+      products_total = 0, vehicle_pref = 'any',
       location_note,
     } = req.query;
 
@@ -240,6 +240,7 @@ router.get('/fare-estimate', async (req, res) => {
       stopoverWaitMin: parseInt(stopover_wait_min) || 0,
       serviceType: service_type, zone,
       passengerCount: parseInt(passenger_count) || 1,
+      vehicleClass: String(vehicle_pref).toLowerCase() === 'car' ? 'car' : 'standard',
       isFirstBooking: firstBooking,
       surgeActive: surge.active, surgeMultiplier: surge.multiplier,
       containerCount: parseInt(container_count) || 1,
@@ -300,7 +301,7 @@ router.get('/vehicle-availability', authenticate, async (req, res) => {
     }
     const locationCheck = await checkLocationAllowed(parseFloat(pickup_lat), parseFloat(pickup_lng));
     const zone = locationCheck.zone;
-    if (!zone) return res.json({ success: true, motorcycle: 0, tricycle: 0 });
+    if (!zone) return res.json({ success: true, motorcycle: 0, tricycle: 0, car: 0 });
     const { rows } = await query(
       `SELECT TRIM(LOWER(COALESCE(dp.vehicle_type,'tricycle'))) AS vtype, COUNT(*)::int AS n
        FROM driver_profiles dp JOIN users u ON u.id = dp.user_id
@@ -310,12 +311,13 @@ router.get('/vehicle-availability', authenticate, async (req, res) => {
          AND dp.current_lat IS NOT NULL AND u.zone_id = $1
        GROUP BY vtype`,
       [zone.id]);
-    let motorcycle = 0, tricycle = 0;
+    let motorcycle = 0, tricycle = 0, car = 0;
     for (const r of rows) {
       if (r.vtype === 'motorcycle') motorcycle = r.n;
-      else tricycle += r.n;  // treat anything non-motorcycle as tricycle
+      else if (r.vtype === 'car') car = r.n;
+      else tricycle += r.n;  // anything else counts as tricycle
     }
-    res.json({ success: true, motorcycle, tricycle });
+    res.json({ success: true, motorcycle, tricycle, car });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -402,7 +404,7 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
       eligibleVehicle = 'tricycle';
     } else if (service_type === 'ride') {
       const pref = String(vehicle_pref || 'any').toLowerCase();
-      eligibleVehicle = ['tricycle', 'motorcycle'].includes(pref) ? pref : 'any';
+      eligibleVehicle = ['tricycle', 'motorcycle', 'car'].includes(pref) ? pref : 'any';
     } else {
       // food, store/delivery, custom errand -> any vehicle
       eligibleVehicle = 'any';
@@ -493,6 +495,7 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
       stopoverWaitMin: 0, // wait time added later by driver
       serviceType: service_type, zone: activeZone.slug,
       passengerCount: passengers, isFirstBooking: firstBooking,
+      vehicleClass: eligibleVehicle === 'car' ? 'car' : 'standard',
       surgeActive: surge.active, surgeMultiplier: surge.multiplier,
       containerCount: container_count,
       tankCount: parseInt(tank_count) || 1,

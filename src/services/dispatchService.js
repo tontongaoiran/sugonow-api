@@ -42,12 +42,12 @@ async function getGiveUpMin() {
  * originLat/originLng = customer pickup (for rides) OR store (for orders)
  */
 const getNearestDrivers = async (zoneId, originLat, originLng, limit = 10, eligibleVehicle = 'any') => {
-  // Only notify drivers whose vehicle matches the booking's eligibility.
-  // 'any' = no restriction (tricycle + motorcycle both eligible).
-  // TRIM+LOWER both sides: a stray space in vehicle_type once made a driver
-  // invisible to dispatch. Never trust raw string equality here again.
-  const vehicleFilter = (eligibleVehicle && eligibleVehicle !== 'any')
-    ? `AND TRIM(LOWER(COALESCE(dp.vehicle_type, 'tricycle'))) = '${eligibleVehicle === 'motorcycle' ? 'motorcycle' : 'tricycle'}'`
+  // Only notify drivers whose ACTIVE vehicle matches the booking's eligibility.
+  // 'any' = no restriction. Whitelist the class so we never interpolate raw input.
+  const VALID_CLASS = { motorcycle: 'motorcycle', tricycle: 'tricycle', car: 'car' };
+  const cls = VALID_CLASS[String(eligibleVehicle || '').trim().toLowerCase()];
+  const vehicleFilter = cls
+    ? `AND TRIM(LOWER(COALESCE(dp.vehicle_type, 'tricycle'))) = '${cls}'`
     : '';
   const { rows } = await query(
     `SELECT u.id, u.mobile, u.full_name,
