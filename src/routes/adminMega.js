@@ -468,6 +468,8 @@ router.post('/farecfg-settings', async (req, res) => {
     const cap = parseFloat(req.body.product_fee_cap_custom);
     const pickupPerKm = parseFloat(req.body.pickup_per_km);
     const pickupCap = parseFloat(req.body.pickup_fee_cap);
+    const carBase = parseFloat(req.body.car_base_fare);
+    const carPerKm = parseFloat(req.body.car_per_km);
     const useRoad = req.body.use_road_distance !== false && req.body.use_road_distance !== 'false';
     const productActive = req.body.product_fee_active !== false && req.body.product_fee_active !== 'false';
     for (const [label, v] of [['1st km', km1], ['2nd km', km2], ['succeeding km', kmN]]) {
@@ -477,12 +479,15 @@ router.post('/farecfg-settings', async (req, res) => {
     if (isNaN(cap) || cap < 0) return res.status(400).json({ success: false, message: 'Custom cap must be ₱0 or more.' });
     if (isNaN(pickupPerKm) || pickupPerKm < 0) return res.status(400).json({ success: false, message: 'Pickup ₱/km must be ₱0 or more.' });
     if (isNaN(pickupCap) || pickupCap < 0) return res.status(400).json({ success: false, message: 'Pickup fee cap must be ₱0 or more.' });
+    if (isNaN(carBase) || carBase < 0) return res.status(400).json({ success: false, message: 'Car base fare must be ₱0 or more.' });
+    if (isNaN(carPerKm) || carPerKm < 0) return res.status(400).json({ success: false, message: 'Car ₱/km must be ₱0 or more.' });
     const pairs = [
       ['fare_km1', km1], ['fare_km2', km2], ['fare_kmN', kmN],
       ['product_fee_pct', pct], ['product_fee_cap_custom', cap],
       ['product_fee_active', productActive ? 'true' : 'false'],
       ['fare_use_road_distance', useRoad ? 'true' : 'false'],
       ['pickup_per_km', pickupPerKm], ['pickup_fee_cap', pickupCap],
+      ['car_base_fare', carBase], ['car_per_km', carPerKm],
     ];
     for (const [k, v] of pairs) {
       const { rowCount } = await query(`UPDATE app_settings SET value=$1 WHERE key=$2`, [String(v), k]);

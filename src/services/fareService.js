@@ -32,13 +32,13 @@ const GOOGLE_KEY = process.env.GOOGLE_MAPS_API_KEY;
 let _fcCache = { v: null, t: 0 };
 async function getFareConfig() {
   if (_fcCache.v && Date.now() - _fcCache.t < 30000) return _fcCache.v;
-  const cfg = { km1: 10, km2: 15, kmN: 20, productPct: 5, productCapCustom: 50, productActive: true, useRoad: true, pickupPerKm: 10, pickupCap: 30 };
+  const cfg = { km1: 10, km2: 15, kmN: 20, productPct: 5, productCapCustom: 50, productActive: true, useRoad: true, pickupPerKm: 10, pickupCap: 30, carBase: 60, carPerKm: 25 };
   try {
     const { rows } = await query(
       `SELECT key, value FROM app_settings
        WHERE key IN ('fare_km1','fare_km2','fare_kmN','product_fee_pct',
                      'product_fee_cap_custom','product_fee_active','fare_use_road_distance',
-                     'pickup_per_km','pickup_fee_cap')`);
+                     'pickup_per_km','pickup_fee_cap','car_base_fare','car_per_km')`);
     const m = Object.fromEntries(rows.map(r => [r.key, r.value]));
     if (m.fare_km1 != null && !isNaN(parseFloat(m.fare_km1))) cfg.km1 = parseFloat(m.fare_km1);
     if (m.fare_km2 != null && !isNaN(parseFloat(m.fare_km2))) cfg.km2 = parseFloat(m.fare_km2);
@@ -49,6 +49,8 @@ async function getFareConfig() {
     if (m.fare_use_road_distance != null) cfg.useRoad = String(m.fare_use_road_distance) !== 'false';
     if (m.pickup_per_km != null && !isNaN(parseFloat(m.pickup_per_km))) cfg.pickupPerKm = parseFloat(m.pickup_per_km);
     if (m.pickup_fee_cap != null && !isNaN(parseFloat(m.pickup_fee_cap))) cfg.pickupCap = parseFloat(m.pickup_fee_cap);
+    if (m.car_base_fare != null && !isNaN(parseFloat(m.car_base_fare))) cfg.carBase = parseFloat(m.car_base_fare);
+    if (m.car_per_km != null && !isNaN(parseFloat(m.car_per_km))) cfg.carPerKm = parseFloat(m.car_per_km);
   } catch (e) { /* defaults */ }
   _fcCache = { v: cfg, t: Date.now() };
   return cfg;
@@ -161,6 +163,7 @@ const calculateFare = async ({
   stopoverLat, stopoverLng, stopoverWaitMin = 0,
   serviceType = 'ride', zone = 'flora',
   passengerCount = 1, isFirstBooking = false,
+  vehicleClass = 'standard',
   surgeMultiplier = 1.0, surgeActive = false,
   includePickupCharge = false,
   containerCount = 1,
@@ -215,6 +218,12 @@ const calculateFare = async ({
       baseTotal += (tanks - 1) * 20;                 // +₱20 per extra tank
       // distanceCharge stays = distChargeRaw (single per-km for the trip)
     }
+    fare = Math.round(baseTotal + distanceCharge);
+  } else if (vehicleClass === 'car') {
+    // Car / Comfort: a flat higher base (up to seat capacity — NOT × passengers)
+    // plus a higher flat per-km. Both admin-editable in Fares & Fees.
+    baseTotal      = fc.carBase;
+    distanceCharge = Math.ceil(billableKm * fc.carPerKm);
     fare = Math.round(baseTotal + distanceCharge);
   } else {
     // Ride pricing: base × passengers + distance

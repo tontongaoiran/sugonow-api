@@ -1005,7 +1005,11 @@ async function renderMoney(){
     <div class="field"><label>Pickup fee — ₱/km (driver→store)</label>
       <input id="fc-pickkm" type="number" value="${fcfg?.pickupPerKm??10}"></div>
     <div class="field"><label>Pickup fee — cap (₱ max)</label>
-      <input id="fc-pickcap" type="number" value="${fcfg?.pickupCap??30}">
+      <input id="fc-pickcap" type="number" value="${fcfg?.pickupCap??30}"></div>
+    <div class="field"><label>Car / Comfort — base fare (₱)</label>
+      <input id="fc-carbase" type="number" value="${fcfg?.carBase??60}"></div>
+    <div class="field"><label>Car / Comfort — ₱/km</label>
+      <input id="fc-carkm" type="number" value="${fcfg?.carPerKm??25}">
       <button class="btn btn-green" onclick="saveFareCfg()">Save tiered fares</button></div>
     <div class="note">Pickup fee = driver's road distance to the store × ₱/km, capped. Near driver = small; far = up to the cap. Added when a driver is matched; customers see "up to ₱cap" before booking. This replaces the old straight-line × flat-rate pickup charge.</div>
     <div class="section">Custom cancellation fee</div>
@@ -1058,7 +1062,9 @@ async function saveFareCfg(){ try{ await post('/admin/farecfg-settings',{
     product_fee_active:document.getElementById('fc-pactive').value==='true',
     use_road_distance:document.getElementById('fc-road').value==='true',
     pickup_per_km:parseFloat(document.getElementById('fc-pickkm').value),
-    pickup_fee_cap:parseFloat(document.getElementById('fc-pickcap').value)}); toast('Tiered fares saved'); }catch(e){ toast(e.message); } }
+    pickup_fee_cap:parseFloat(document.getElementById('fc-pickcap').value),
+    car_base_fare:parseFloat(document.getElementById('fc-carbase').value),
+    car_per_km:parseFloat(document.getElementById('fc-carkm').value)}); toast('Tiered fares saved'); }catch(e){ toast(e.message); } }
 async function saveDeliveryFares(){ try{ await post('/admin/delivery-fares',{
     food:parseFloat(document.getElementById('m-fare-food').value),
     lpg:parseFloat(document.getElementById('m-fare-lpg').value),
