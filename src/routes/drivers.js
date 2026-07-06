@@ -70,6 +70,23 @@ const VALID_CLASSES = ['motorcycle', 'tricycle', 'car'];
 // GET /drivers/vehicles — the driver's vehicles + which is active
 router.get('/vehicles', authenticate, requireRole('driver'), async (req, res) => {
   try {
+    // Auto-heal: a driver who registered before/without a vehicle row (e.g. a brand-
+    // new driver) gets one created from their current vehicle_type, set active. This
+    // makes their registration vehicle appear here and stay dispatchable.
+    const { rows: have } = await query(
+      `SELECT 1 FROM driver_vehicles WHERE driver_id=$1 LIMIT 1`, [req.user.id]);
+    if (!have[0]) {
+      const { rows: dp } = await query(
+        `SELECT COALESCE(NULLIF(TRIM(LOWER(vehicle_type)),''),'tricycle') AS cls, plate_number
+           FROM driver_profiles WHERE user_id=$1`, [req.user.id]);
+      if (dp[0]) {
+        const { rows: nv } = await query(
+          `INSERT INTO driver_vehicles (driver_id, vehicle_class, plate_number, verified)
+           VALUES ($1,$2,$3,TRUE) RETURNING id`, [req.user.id, dp[0].cls, dp[0].plate_number]);
+        await query(`UPDATE driver_profiles SET active_vehicle_id=$1 WHERE user_id=$2 AND active_vehicle_id IS NULL`,
+          [nv[0].id, req.user.id]);
+      }
+    }
     const { rows } = await query(
       `SELECT v.id, v.vehicle_class, v.plate_number, v.model, v.color, v.verified,
               (v.id = dp.active_vehicle_id) AS is_active
