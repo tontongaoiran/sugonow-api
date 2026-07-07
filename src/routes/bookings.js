@@ -1268,9 +1268,20 @@ router.patch('/:id/complete', authenticate, requireVerifiedDriver, async (req, r
     // ── Issue the e-receipt ──
     let receipt = null;
     try {
+      // For food/store orders the products are itemized on the receipt, so putting
+      // the whole total in "base fare" double-counts them (the ₱255 bug). Set base
+      // fare to 0 and make delivery_fee = (total − products) — which also folds the
+      // 5% product fee into a single "Delivery fee". Rides keep the fare breakdown.
+      const { rows: _ps } = await query(
+        `SELECT COALESCE(SUM(unit_price * quantity),0) AS subtotal
+           FROM order_items WHERE booking_id=$1 AND (status='ok' OR status IS NULL)`,
+        [booking.id]);
+      const productsSubtotal = parseFloat(_ps[0].subtotal);
+      const isFoodStore = productsSubtotal > 0;
+      const estFare = parseFloat(booking.estimated_fare ?? 0);
       receipt = await issueReceipt(booking, {
-        base_fare:       parseFloat(booking.estimated_fare ?? 0) - parseFloat(booking.stopover_charge ?? 0),
-        delivery_fee:    parseFloat(booking.delivery_fee ?? 0),
+        base_fare:       isFoodStore ? 0 : (estFare - parseFloat(booking.stopover_charge ?? 0)),
+        delivery_fee:    isFoodStore ? Math.max(0, estFare - productsSubtotal) : parseFloat(booking.delivery_fee ?? 0),
         lpg_product_cost: lpgCost,
         stopover_charge: parseFloat(booking.stopover_charge ?? 0),
         discount_amount: parseFloat(booking.discount_amount ?? 0),
