@@ -874,15 +874,29 @@ async function renderIssues(){
   try{
     if(issuesSub==='reports'){
       const r=await get('/admin/reports?resolved=false'); const list=r.reports||[];
-      body.innerHTML = list.length? `<table><tr><th>From</th><th>Role</th><th>Category</th><th>Message</th><th>When</th><th></th></tr>`+
-        list.map(x=>`<tr><td>${esc(x.full_name||x.user_name||'—')}</td><td>${esc(x.role||'')}</td><td>${esc(x.category||'')}</td>
-          <td>${esc(x.message)}</td><td>${x.created_at?new Date(x.created_at).toLocaleDateString():''}</td>
-          <td><button class="btn btn-green" onclick="resolveReport('${x.id}')">Resolve</button></td></tr>`).join('')+`</table>`
+      body.innerHTML = list.length? `<table><tr><th>From</th><th>Filed by</th><th>Type</th><th>Complaint</th><th>When</th><th></th></tr>`+
+        list.map(x=>{
+          const isDriver = x.filed_by==='driver';
+          const who = isDriver ? (x.driver_name||'Driver') : (x.customer_name||'Customer');
+          const mob = isDriver ? x.driver_mobile : x.customer_mobile;
+          const msg = (x.comment||'').replace('[DRIVER REPORT]','').trim() || '—';
+          return `<tr>
+            <td>${esc(who)}${mob?`<div class="note"><a href="tel:${esc(mob)}">📞 ${esc(mob)}</a></div>`:''}</td>
+            <td>${esc(x.filed_by||'')}</td>
+            <td>${esc(x.report_type||'—')}</td>
+            <td>${esc(msg)}${x.booking_id?`<div class="note">booking ${esc(String(x.booking_id).slice(0,8))}</div>`:''}</td>
+            <td>${x.created_at?new Date(x.created_at).toLocaleDateString():''}</td>
+            <td><button class="btn btn-green" onclick="resolveReport('${x.id}')">Resolve</button></td></tr>`;
+        }).join('')+`</table>`
         : '<div class="empty">No open complaints. ✅</div>';
     } else if(issuesSub==='flags'){
       const r=await get('/admin/fraud-flags'); const list=r.flags||r.fraud_flags||[];
-      body.innerHTML = list.length? `<table><tr><th>Type</th><th>Detail</th><th>When</th></tr>`+
-        list.map(x=>`<tr><td>${esc(x.flag_type||x.type||'')}</td><td>${esc(x.detail||x.note||x.reason||'')}</td>
+      body.innerHTML = list.length? `<table><tr><th>Severity</th><th>Type</th><th>Driver</th><th>Detail</th><th>When</th></tr>`+
+        list.map(x=>`<tr>
+          <td><span class="tag ${x.severity==='critical'||x.severity==='high'?'tag-off':'tag-busy'}">${esc(x.severity||'—')}</span></td>
+          <td>${esc(x.flag_type||x.type||'')}</td>
+          <td>${esc(x.driver_name||'—')}${x.driver_mobile?`<div class="note">📞 ${esc(x.driver_mobile)}</div>`:''}</td>
+          <td>${esc(x.details||x.detail||x.note||x.reason||'—')}</td>
           <td>${x.created_at?new Date(x.created_at).toLocaleString():''}</td></tr>`).join('')+`</table>`
         : '<div class="empty">No fraud flags. ✅</div>';
     } else {

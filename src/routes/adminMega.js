@@ -28,7 +28,7 @@ router.get('/reports', async (req, res) => {
       `SELECT r.id, r.booking_id, r.stars, r.comment,
               r.report_type, r.resolved, r.created_at,
               r.customer_id, r.driver_id,
-              cu.full_name AS customer_name,
+              cu.full_name AS customer_name, cu.mobile AS customer_mobile,
               du.full_name AS driver_name, du.mobile AS driver_mobile,
               CASE WHEN r.comment LIKE '[DRIVER REPORT]%'
                    THEN 'driver' ELSE 'customer' END AS filed_by
