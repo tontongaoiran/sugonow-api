@@ -61,7 +61,7 @@ router.post('/unavailable', requireRole('driver'), async (req, res) => {
     );
     if (!item[0]) return res.status(404).json({ success: false, message: 'Item not found.' });
 
-    await query(`UPDATE order_items SET status='unavailable' WHERE id=$1`, [order_item_id]);
+    await query(`UPDATE order_items SET status='unavailable', unavailable_at=NOW() WHERE id=$1`, [order_item_id]);
 
     // Suggest up to 4 available substitutes from the same store, similar price
     let suggestions = [];
@@ -183,5 +183,33 @@ router.post('/resolve', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+// ── Auto-remove items left UNAVAILABLE for >3 min (customer didn't respond) ──
+// If the customer picks a substitute or removes it first, the status changes and
+// this skips it. Otherwise, after 3 minutes we remove it, recompute the order, and
+// tell both the customer and driver (their screens then poll the new total).
+async function autoResolveStaleUnavailable() {
+  try {
+    const { rows: stale } = await query(
+      `SELECT oi.id, oi.product_name, oi.booking_id, b.driver_id, b.customer_id
+         FROM order_items oi
+         JOIN bookings b ON b.id = oi.booking_id
+        WHERE oi.status = 'unavailable'
+          AND oi.unavailable_at IS NOT NULL
+          AND oi.unavailable_at < NOW() - INTERVAL '3 minutes'
+          AND b.status NOT IN ('completed','cancelled')`);
+    for (const it of stale) {
+      await query(`UPDATE order_items SET status='removed' WHERE id=$1`, [it.id]);
+      const totals = await recomputeBookingTotal(it.booking_id);
+      if (it.customer_id) sendPush(it.customer_id, 'Item removed from your order',
+        `"${it.product_name}" was auto-removed (no response in 3 min). New total: ₱${totals.estimated_fare}.`,
+        { type: 'sub_auto_removed', bookingId: it.booking_id }).catch(() => {});
+      if (it.driver_id) sendPush(it.driver_id, 'Item auto-removed',
+        `"${it.product_name}" auto-removed. New amount to collect: ₱${totals.estimated_fare}.`,
+        { type: 'sub_auto_removed', bookingId: it.booking_id }).catch(() => {});
+    }
+  } catch (e) { /* best-effort background job */ }
+}
+setInterval(autoResolveStaleUnavailable, 30000);   // check every 30 seconds
 
 module.exports = router;
