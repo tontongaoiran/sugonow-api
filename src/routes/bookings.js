@@ -1177,6 +1177,33 @@ router.patch('/:id/complete', authenticate, requireVerifiedDriver, async (req, r
       return res.status(409).json({ success: false, message: 'This booking was already completed.' });
     }
 
+    // ── Non-GPS fraud detection: self-booking / linked-account promo farming ──
+    // A driver completing a booking placed by their OWN account is farming
+    // completions/promos; a driver + customer who referred each other are likely
+    // linked accounts. Both raise a fraud flag (best-effort; never blocks completion).
+    try {
+      const drvId = booking.driver_id || req.user.id;
+      if (booking.customer_id && drvId && String(booking.customer_id) === String(drvId)) {
+        await query(
+          `INSERT INTO fraud_flags (driver_id, booking_id, flag_type, severity, details)
+           VALUES ($1,$2,'self_booking','critical',$3)`,
+          [drvId, booking.id, 'Driver completed a booking placed by their own account (customer = driver).']
+        ).catch(() => {});
+      } else if (booking.customer_id && drvId) {
+        const { rows: _lk } = await query(
+          `SELECT 1 FROM users
+            WHERE (id=$1 AND referred_by=$2) OR (id=$2 AND referred_by=$1) LIMIT 1`,
+          [booking.customer_id, drvId]);
+        if (_lk[0]) {
+          await query(
+            `INSERT INTO fraud_flags (driver_id, booking_id, flag_type, severity, details)
+             VALUES ($1,$2,'linked_account','high',$3)`,
+            [drvId, booking.id, 'Driver and customer are referral-linked accounts — possible promo farming.']
+          ).catch(() => {});
+        }
+      }
+    } catch (e) { /* fraud check is best-effort */ }
+
     // ── Money flow (pre-paid driver wallet model) ──
     // SugoNow's cut (commission + the ₱5 booking fee for non-Pass members) is
     // deducted from the driver's pre-paid wallet. The driver keeps the cash they
