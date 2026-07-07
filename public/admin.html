@@ -868,6 +868,7 @@ async function renderIssues(){
   setContent(`<div class="toolbar">
       <span class="subtab ${issuesSub==='reports'?'active':''}" onclick="issuesSub='reports';renderIssues()">⚠️ Complaints</span>
       <span class="subtab ${issuesSub==='flags'?'active':''}" onclick="issuesSub='flags';renderIssues()">🚩 Fraud flags</span>
+      <span class="subtab ${issuesSub==='risk'?'active':''}" onclick="issuesSub='risk';renderIssues()">👤 Driver risk</span>
       <span class="subtab ${issuesSub==='syslog'?'active':''}" onclick="issuesSub='syslog';renderIssues()">⚙️ System log</span>
     </div><div id="issues-body"><div class="loading">Loading…</div></div>`);
   const body=document.getElementById('issues-body');
@@ -886,7 +887,7 @@ async function renderIssues(){
             <td>${esc(x.report_type||'—')}</td>
             <td>${esc(msg)}${x.booking_id?`<div class="note">booking ${esc(String(x.booking_id).slice(0,8))}</div>`:''}</td>
             <td>${x.created_at?new Date(x.created_at).toLocaleDateString():''}</td>
-            <td><button class="btn btn-green" onclick="resolveReport('${x.id}')">Resolve</button></td></tr>`;
+            <td>${(!isDriver && x.customer_id)?`<button class="btn btn-gold" onclick="grantCredit('${x.customer_id}','${jsq(who)}')">💳 Credit</button> `:''}<button class="btn btn-green" onclick="resolveReport('${x.id}')">Resolve</button></td></tr>`;
         }).join('')+`</table>`
         : '<div class="empty">No open complaints. ✅</div>';
     } else if(issuesSub==='flags'){
@@ -899,6 +900,19 @@ async function renderIssues(){
           <td>${esc(x.details||x.detail||x.note||x.reason||'—')}</td>
           <td>${x.created_at?new Date(x.created_at).toLocaleString():''}</td></tr>`).join('')+`</table>`
         : '<div class="empty">No fraud flags. ✅</div>';
+    } else if(issuesSub==='risk'){
+      const r=await get('/admin/driver-risk'); const list=r.drivers||[];
+      body.innerHTML = list.length? `<table><tr><th>Driver</th><th>Completed</th><th>Cancelled</th><th>Complaints</th><th>Open flags</th></tr>`+
+        list.map(x=>{
+          const risky = (x.open_flags>0)||(x.complaints>1)||(x.cancelled>x.completed && x.cancelled>2);
+          return `<tr${risky?' style="background:#fff5f5"':''}>
+            <td>${esc(x.full_name||'—')}${x.mobile?`<div class="note">📞 ${esc(x.mobile)}</div>`:''}</td>
+            <td>${x.completed}</td>
+            <td>${x.cancelled}</td>
+            <td>${x.complaints>0?`<b style="color:#c0392b">${x.complaints}</b>`:'0'}</td>
+            <td>${x.open_flags>0?`<span class="tag tag-off">${x.open_flags}</span>`:'0'}</td></tr>`;
+        }).join('')+`</table>`
+        : '<div class="empty">No drivers yet.</div>';
     } else {
       const r=await get('/admin/error-log'); const list=r.errors||[];
       body.innerHTML = `<div class="toolbar"><button class="btn btn-red" onclick="clearSysLog()">Clear log</button></div>`+

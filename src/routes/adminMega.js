@@ -20,6 +20,29 @@ const DELIVERY_BONUS = 5; // ₱ per completed delivery (Month 1-2 launch promo)
 const router = express.Router();
 router.use(authenticate, requireRole('admin'));
 
+// ─── GET /admin/driver-risk — per-driver risk snapshot ──────────────────────
+// Aggregates each driver's completed/cancelled bookings, complaints filed against
+// them, and open fraud flags, so risky drivers surface at the top.
+router.get('/driver-risk', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT u.id, u.full_name, u.mobile,
+              COUNT(b.id) FILTER (WHERE b.status='completed')::int AS completed,
+              COUNT(b.id) FILTER (WHERE b.status='cancelled')::int AS cancelled,
+              (SELECT COUNT(*) FROM ratings r
+                 WHERE r.driver_id=u.id AND r.is_report=TRUE)::int AS complaints,
+              (SELECT COUNT(*) FROM fraud_flags ff
+                 WHERE ff.driver_id=u.id AND ff.resolved=FALSE)::int AS open_flags
+       FROM users u
+       LEFT JOIN bookings b ON b.driver_id = u.id
+       WHERE u.role='driver' AND u.deleted_at IS NULL
+       GROUP BY u.id, u.full_name, u.mobile
+       ORDER BY open_flags DESC, complaints DESC, cancelled DESC, u.full_name ASC
+       LIMIT 200`);
+    res.json({ success: true, drivers: rows });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ─── GET /admin/reports — complaints (from customers AND drivers) ────────────
 router.get('/reports', async (req, res) => {
   try {
