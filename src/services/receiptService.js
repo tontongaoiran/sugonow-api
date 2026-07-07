@@ -74,7 +74,9 @@ async function getReceiptByBooking(bookingId) {
   const { rows: items } = await query(
     `SELECT product_name, quantity, unit_price,
             (unit_price * quantity) AS line_total, options_text
-       FROM order_items WHERE booking_id = $1 ORDER BY id`, [bookingId]);
+       FROM order_items
+      WHERE booking_id = $1 AND (status = 'ok' OR status IS NULL)
+      ORDER BY id`, [bookingId]);
   const products_subtotal = items.reduce(
     (s, i) => s + (parseFloat(i.unit_price) || 0) * (parseInt(i.quantity) || 1), 0);
   return {

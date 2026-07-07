@@ -1134,7 +1134,17 @@ router.patch('/:id/complete', authenticate, requireVerifiedDriver, async (req, r
     // commission. We clamp to the server value.
     const serverFare = parseFloat(booking.estimated_fare ?? 0);
     const appFare = final_fare != null ? parseFloat(final_fare) : serverFare;
-    const customerFare = Math.max(serverFare, isNaN(appFare) ? serverFare : appFare);
+    // If the order was modified mid-booking (item removed / unavailable /
+    // substituted), the server's RECOMPUTED estimated_fare is authoritative — the
+    // app's final_fare is stale and higher, so we must NOT clamp up to it (that
+    // would overcharge the customer and misreport the driver's earnings). Normal
+    // orders keep the anti-underpay clamp.
+    const { rows: _modf } = await query(
+      `SELECT 1 FROM order_items WHERE booking_id=$1
+         AND status IN ('removed','unavailable','substituted') LIMIT 1`, [booking.id]);
+    const customerFare = _modf[0]
+      ? serverFare
+      : Math.max(serverFare, isNaN(appFare) ? serverFare : appFare);
     const promoCovered = parseFloat(booking.promo_discount ?? 0);
     const fullFare = customerFare + promoCovered;   // used for customer-facing totals
     const commRate = (await getCommissionRate()) / 100;
