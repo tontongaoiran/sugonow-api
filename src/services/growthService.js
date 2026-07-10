@@ -18,7 +18,8 @@ async function settings() {
      ('earn_credit_amount','earn_credit_active','referral_amount','referral_active',
       'driver_wallet_min_topup','driver_wallet_active','bundle_voucher_active',
       'bundle_voucher_hours','milestone_active','milestone_target_trips',
-      'milestone_min_rating','milestone_bonus')`
+      'milestone_min_rating','milestone_bonus',
+      'bundle_credit_active','bundle_credit_amount','bundle_credit_min_order')`
   );
   const m = Object.fromEntries(rows.map(r => [r.key, r.value]));
   return {
@@ -34,6 +35,9 @@ async function settings() {
     milestoneTrips:    parseInt(m.milestone_target_trips ?? '35'),
     milestoneRating:   parseFloat(m.milestone_min_rating ?? '4.6'),
     milestoneBonus:    parseFloat(m.milestone_bonus ?? '300'),
+    bundleCreditActive:   m.bundle_credit_active === 'true',
+    bundleCreditAmount:   parseFloat(m.bundle_credit_amount ?? '20'),
+    bundleCreditMinOrder: parseFloat(m.bundle_credit_min_order ?? '150'),
   };
 }
 
@@ -93,21 +97,25 @@ async function onBookingCompleted(booking) {
     }
   }
 
-  // 3. Bundle voucher: LPG or water order unlocks free food delivery
-  if (s.voucherActive && ['exchange', 'water'].includes(booking.service_type)) {
-    const expires = new Date(Date.now() + s.voucherHours * 3600 * 1000);
-    await query(
-      `INSERT INTO vouchers (customer_id, type, earned_from, expires_at)
-       VALUES ($1,'free_food_delivery',$2,$3)`,
-      [customerId, booking.id, expires]
-    );
-    // Let the customer know they earned it, so it doesn't sit unnoticed.
-    const validHrs = s.voucherHours;
-    const validText = validHrs % 24 === 0 ? `${validHrs / 24} day(s)` : `${validHrs} hours`;
-    sendPush(customerId, '🎟️ You earned a FREE delivery!',
-      `Thanks for your order! Your next food delivery is FREE — use it within ${validText}. Tap to order.`,
-      { type: 'voucher_earned' }
-    ).catch(() => {});
+  // 3. Bundle reward: completing an LPG/water order grants a small FIXED wallet
+  //    credit (not free delivery — that was exploitable, since the delivery a
+  //    voucher waived could cost far more than the small order that earned it).
+  //    Only orders at/above the minimum earn it, which kills the "cheap order ->
+  //    valuable reward" loop. The credit is a fixed peso amount, spendable on
+  //    anything, so its cost to SugoNow is known and bounded. All admin-tunable.
+  if (s.bundleCreditActive && ['exchange', 'water'].includes(booking.service_type) && s.bundleCreditAmount > 0) {
+    const { rows: bt } = await query(
+      `SELECT COALESCE(final_fare, estimated_fare, 0) AS total FROM bookings WHERE id=$1`,
+      [booking.id]);
+    const orderTotal = parseFloat(bt[0]?.total || 0);
+    if (orderTotal >= s.bundleCreditMinOrder) {
+      await addWalletCredit(customerId, s.bundleCreditAmount, 'bundle_reward',
+        `Reward for your ${booking.service_type} order`, booking.id);
+      sendPush(customerId, `🎁 You earned ₱${s.bundleCreditAmount} credit!`,
+        `Salamat sa order mo! Nag-add kami ng ₱${s.bundleCreditAmount} sa SugoNow wallet mo — gamitin mo sa susunod mong order.`,
+        { type: 'bundle_credit' }
+      ).catch(() => {});
+    }
   }
 
   // 4. Driver milestone progress

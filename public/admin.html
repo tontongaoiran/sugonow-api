@@ -1188,9 +1188,10 @@ async function renderGrowth(){
         ${tg('Referral rewards active','referral_active',st.referralActive)}
         ${num('Referral amount each side (₱)','referral_amount','g-ref',st.referral)}
 
-        <div class="section">Bundle voucher (LPG/water → free food delivery)</div>
-        ${tg('Bundle voucher active','bundle_voucher_active',st.voucherActive)}
-        ${num('Voucher valid for (hours)','bundle_voucher_hours','g-vh',st.voucherHours)}
+        <div class="section">Bundle reward (LPG/water → wallet credit)</div>
+        ${tg('Bundle reward active','bundle_credit_active',st.bundleCreditActive)}
+        ${num('Credit amount (₱)','bundle_credit_amount','g-bca',st.bundleCreditAmount)}
+        ${num('Min order to earn (₱)','bundle_credit_min_order','g-bcm',st.bundleCreditMinOrder)}
 
         <div class="section">Driver wallet (pre-paid commission)</div>
         ${tg('Driver wallet active','driver_wallet_active',st.driverWalletActive)}
