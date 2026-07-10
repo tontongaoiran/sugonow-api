@@ -312,12 +312,18 @@ router.get('/fare-estimate', async (req, res) => {
 router.get('/vehicle-availability', authenticate, async (req, res) => {
   try {
     const { pickup_lat, pickup_lng } = req.query;
-    if (!pickup_lat || !pickup_lng) {
-      return res.status(400).json({ success: false, message: 'pickup_lat/lng required.' });
+    let zone = null;
+    if (pickup_lat && pickup_lng) {
+      const locationCheck = await checkLocationAllowed(parseFloat(pickup_lat), parseFloat(pickup_lng));
+      zone = locationCheck.zone;
+    } else {
+      // No pickup yet — use the active Flora zone so the ride screen can still show counts.
+      const { rows: z } = await query(`SELECT id FROM zones WHERE slug='flora' LIMIT 1`);
+      if (z[0]) zone = { id: z[0].id };
     }
-    const locationCheck = await checkLocationAllowed(parseFloat(pickup_lat), parseFloat(pickup_lng));
-    const zone = locationCheck.zone;
     if (!zone) return res.json({ success: true, motorcycle: 0, tricycle: 0, car: 0 });
+    // Count only FREE drivers: online + verified + wallet > 0 + NOT already on an
+    // active trip. Deriving "busy" from live bookings can't drift (no stuck flags).
     const { rows } = await query(
       `SELECT TRIM(LOWER(COALESCE(dp.vehicle_type,'tricycle'))) AS vtype, COUNT(*)::int AS n
        FROM driver_profiles dp JOIN users u ON u.id = dp.user_id
@@ -325,6 +331,10 @@ router.get('/vehicle-availability', authenticate, async (req, res) => {
          AND dp.is_locked = FALSE AND COALESCE(dp.suspended, FALSE) = FALSE
          AND u.deleted_at IS NULL AND COALESCE(dp.wallet_balance,0) > 0
          AND dp.current_lat IS NOT NULL AND u.zone_id = $1
+         AND NOT EXISTS (
+           SELECT 1 FROM bookings b
+            WHERE b.driver_id = dp.user_id
+              AND b.status IN ('accepted','arrived','in_progress','waiting'))
        GROUP BY vtype`,
       [zone.id]);
     let motorcycle = 0, tricycle = 0, car = 0;
@@ -413,15 +423,13 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
     // Ride with 2+ passengers -> tricycle only (a motorcycle can't take them).
     // Food/store delivery -> any (tricycle or motorcycle).
     // Solo ride -> the customer's choice ('any' | 'tricycle' | 'motorcycle').
-    // Notify ALL online drivers for every service. The ONLY restriction is a Car
-    // ride, which must go to car drivers (the premium fare can't be served by a
-    // motorcycle). LPG/water/errands/normal rides all notify everyone — the driver
-    // decides if they can take it. (Previously LPG and 2+ rides were tricycle-only,
-    // which silently starved bookings when no tricycle was online.)
+    // Rides notify ONLY the vehicle the customer chose (a motorbike can't carry a
+    // group; a car is a premium fare). Deliveries (food/LPG/water/errand) notify
+    // EVERY online driver — any vehicle can carry them.
     let eligibleVehicle;
     if (service_type === 'ride') {
-      const pref = String(vehicle_pref || 'any').toLowerCase();
-      eligibleVehicle = (pref === 'car') ? 'car' : 'any';
+      const pref = String(vehicle_pref || '').toLowerCase();
+      eligibleVehicle = ['motorcycle', 'tricycle', 'car'].includes(pref) ? pref : 'any';
     } else {
       eligibleVehicle = 'any';
     }
