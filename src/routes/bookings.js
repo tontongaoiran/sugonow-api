@@ -413,16 +413,16 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
     // Ride with 2+ passengers -> tricycle only (a motorcycle can't take them).
     // Food/store delivery -> any (tricycle or motorcycle).
     // Solo ride -> the customer's choice ('any' | 'tricycle' | 'motorcycle').
+    // Notify ALL online drivers for every service. The ONLY restriction is a Car
+    // ride, which must go to car drivers (the premium fare can't be served by a
+    // motorcycle). LPG/water/errands/normal rides all notify everyone — the driver
+    // decides if they can take it. (Previously LPG and 2+ rides were tricycle-only,
+    // which silently starved bookings when no tricycle was online.)
     let eligibleVehicle;
-    if (service_type === 'exchange' || service_type === 'lpg' || service_type === 'water') {
-      eligibleVehicle = 'tricycle';
-    } else if (service_type === 'ride' && passengers >= 2) {
-      eligibleVehicle = 'tricycle';
-    } else if (service_type === 'ride') {
+    if (service_type === 'ride') {
       const pref = String(vehicle_pref || 'any').toLowerCase();
-      eligibleVehicle = ['tricycle', 'motorcycle', 'car'].includes(pref) ? pref : 'any';
+      eligibleVehicle = (pref === 'car') ? 'car' : 'any';
     } else {
-      // food, store/delivery, custom errand -> any vehicle
       eligibleVehicle = 'any';
     }
 
