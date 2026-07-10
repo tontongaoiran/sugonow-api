@@ -20,6 +20,52 @@ const DELIVERY_BONUS = 5; // ₱ per completed delivery (Month 1-2 launch promo)
 const router = express.Router();
 router.use(authenticate, requireRole('admin'));
 
+// ─── POST /admin/broadcast — segmented push to CUSTOMERS only ────────────────
+// segment: 'all' | 'never_ordered' | 'lapsed'. Only reaches customers with a
+// registered push token. Real remote push — wakes the phone even if the app is closed.
+router.post('/broadcast', async (req, res) => {
+  try {
+    const segment = String(req.body.segment || 'all');
+    const title = (req.body.title || '').trim();
+    const message = (req.body.message || '').trim();
+    if (!title || !message) return res.status(400).json({ success: false, message: 'Title and message are required.' });
+    if (title.length > 80 || message.length > 300) return res.status(400).json({ success: false, message: 'Keep the title under 80 and the message under 300 characters.' });
+
+    let seg = '';
+    if (segment === 'never_ordered') {
+      seg = `AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.customer_id=u.id AND b.status='completed')`;
+    } else if (segment === 'lapsed') {
+      seg = `AND EXISTS (SELECT 1 FROM bookings b WHERE b.customer_id=u.id AND b.status='completed')
+             AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.customer_id=u.id AND b.status='completed'
+                             AND b.completed_at > NOW() - INTERVAL '7 days')`;
+    }
+    const { rows } = await query(
+      `SELECT u.id FROM users u
+        WHERE u.role='customer' AND u.deleted_at IS NULL
+          AND COALESCE(u.banned,FALSE)=FALSE AND u.push_token IS NOT NULL ${seg}`);
+    let sent = 0;
+    for (const r of rows) {
+      try { await sendPush(r.id, title, message, { type: 'broadcast' }); sent++; } catch (e) { /* skip */ }
+    }
+    await query(`INSERT INTO app_settings (key,value) VALUES ('last_broadcast_at',$1)
+                 ON CONFLICT (key) DO UPDATE SET value=$1`, [new Date().toISOString()]).catch(() => {});
+    res.json({ success: true, sent, reachable: rows.length,
+      message: `📣 Sent to ${sent} customer(s) in "${segment}".` });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ─── GET /admin/broadcast-info — segment counts + last-sent (for the UI) ─────
+router.get('/broadcast-info', async (req, res) => {
+  try {
+    const base = `u.role='customer' AND u.deleted_at IS NULL AND COALESCE(u.banned,FALSE)=FALSE AND u.push_token IS NOT NULL`;
+    const { rows: a } = await query(`SELECT COUNT(*)::int n FROM users u WHERE ${base}`);
+    const { rows: nv } = await query(`SELECT COUNT(*)::int n FROM users u WHERE ${base} AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.customer_id=u.id AND b.status='completed')`);
+    const { rows: lp } = await query(`SELECT COUNT(*)::int n FROM users u WHERE ${base} AND EXISTS (SELECT 1 FROM bookings b WHERE b.customer_id=u.id AND b.status='completed') AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.customer_id=u.id AND b.status='completed' AND b.completed_at > NOW() - INTERVAL '7 days')`);
+    const { rows: last } = await query(`SELECT value FROM app_settings WHERE key='last_broadcast_at'`);
+    res.json({ success: true, all: a[0].n, never_ordered: nv[0].n, lapsed: lp[0].n, last_sent: last[0]?.value || null });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ─── GET /admin/driver-risk — per-driver risk snapshot ──────────────────────
 // Aggregates each driver's completed/cancelled bookings, complaints filed against
 // them, and open fraud flags, so risky drivers surface at the top.

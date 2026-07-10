@@ -151,6 +151,7 @@ const TABS = [
   ['issues','🚨','Issues'],
   ['money','💰','Fares & Fees'],
   ['growth','🚀','Growth & Wallets'],
+  ['broadcast','📣','Broadcast'],
   ['insights','📈','Insights'],
   ['users','👥','Users'],
   ['landmarks','📍','Landmarks'],
@@ -307,14 +308,59 @@ async function renderTab(tab){
     if(tab==='drivers') return renderDrivers();
     if(tab==='merchants') return renderMerchants();
     if(tab==='catalog') return renderCatalog();
-    if(tab==='bookings') return renderBookings();
-    if(tab==='issues') return renderIssues();
+    if(tab==='bookings') return renderBookings();    if(tab==='issues') return renderIssues();
     if(tab==='money') return renderMoney();
     if(tab==='growth') return renderGrowth();
+    if(tab==='broadcast') return renderBroadcast();
     if(tab==='insights') return renderInsights();
     if(tab==='users') return renderUsers();
     if(tab==='landmarks') return renderLandmarks();
   }catch(e){ setContent('<div class="empty">'+esc(e.message)+'</div>'); }
+}
+
+async function renderBroadcast(){
+  let info={all:0,never_ordered:0,lapsed:0,last_sent:null};
+  try{ info=await get('/admin/broadcast-info'); }catch(e){}
+  const last = info.last_sent? new Date(info.last_sent).toLocaleString() : 'never';
+  setContent(`
+    <div class="card" style="max-width:640px">
+      <h3>📣 Send a push to customers</h3>
+      <p class="note">Real push — wakes the phone even if the app is closed. Only customers with notifications on are reached. Keep it to 2–3 valuable messages a week so people don't mute you. Last sent: ${esc(last)}.</p>
+      <label>Who</label>
+      <select id="bc-seg" style="width:100%;padding:10px;margin:6px 0 12px">
+        <option value="never_ordered">🎯 Never ordered yet (${info.never_ordered}) — best group: remind them of their ₱30 welcome credit</option>
+        <option value="lapsed">💤 Lapsed — ordered before, quiet 7+ days (${info.lapsed})</option>
+        <option value="all">📢 All customers (${info.all})</option>
+      </select>
+      <label>Title</label>
+      <input id="bc-title" maxlength="80" placeholder="e.g. Lunch time, ka-Flora! 🍚" style="width:100%;padding:10px;margin:6px 0 12px">
+      <label>Message</label>
+      <textarea id="bc-msg" maxlength="300" rows="3" placeholder="e.g. Tinatamad magluto? Order na — may ₱30 ka pang libre sa unang order mo!" style="width:100%;padding:10px;margin:6px 0 12px"></textarea>
+      <div style="margin-bottom:12px">
+        <button class="btn" onclick="bcTemplate('lunch')">🍚 Lunch</button>
+        <button class="btn" onclick="bcTemplate('dinner')">🍲 Dinner</button>
+        <button class="btn" onclick="bcTemplate('welcome')">🎁 Welcome ₱30</button>
+      </div>
+      <button class="btn btn-green" onclick="sendBroadcast()">Send push 📣</button>
+    </div>`);
+}
+function bcTemplate(t){
+  const T={
+    lunch:['Lunch time, ka-Flora! 🍚','Tinatamad magluto? Mag-order na ng paborito mong pagkain sa SugoNow — kami na bahala sa hatid!'],
+    dinner:['Hapunan na! 🍲','Ano cravings mo ngayong gabi? Order mo na sa SugoNow, dala namin sa pintuan mo.'],
+    welcome:['May ₱30 ka nang libre! 🎁','Gamitin mo ang ₱30 welcome credit mo sa unang order sa SugoNow. Pagkain, tubig, LPG — sagot ka namin!'],
+  };
+  document.getElementById('bc-title').value=T[t][0];
+  document.getElementById('bc-msg').value=T[t][1];
+}
+async function sendBroadcast(){
+  const segment=document.getElementById('bc-seg').value;
+  const title=document.getElementById('bc-title').value.trim();
+  const message=document.getElementById('bc-msg').value.trim();
+  if(!title||!message){ toast('Enter a title and message.'); return; }
+  if(!confirm('Send this push to the "'+segment+'" customers now?')) return;
+  try{ const r=await post('/admin/broadcast',{segment,title,message}); toast(r.message||'Sent'); renderBroadcast(); }
+  catch(e){ toast(e.message||'Could not send'); }
 }
 </script>
 
