@@ -78,7 +78,8 @@ router.post('/admin/settings', requireRole('admin'), async (req, res) => {
     const { key, value } = req.body;
     const allowed = ['earn_credit_amount','earn_credit_active','referral_amount','referral_active',
       'driver_wallet_min_topup','driver_wallet_active','bundle_voucher_active','bundle_voucher_hours',
-      'milestone_active','milestone_target_trips','milestone_min_rating','milestone_bonus'];
+      'milestone_active','milestone_target_trips','milestone_min_rating','milestone_bonus',
+      'bundle_credit_active','bundle_credit_amount','bundle_credit_min_order'];
     if (!allowed.includes(key)) return res.status(400).json({ success: false, message: 'Invalid setting.' });
     await query(
       `INSERT INTO app_settings (key, value) VALUES ($1,$2)
