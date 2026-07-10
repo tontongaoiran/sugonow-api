@@ -193,6 +193,33 @@ router.get('/bookings', async (req, res) => {
   }
 });
 
+// ─── GET /admin/missed-bookings — cancelled bookings, with a reason ──────────
+// Powers the web admin "Missed / no-driver" subtab. Classifies each cancelled
+// booking: cancelled after a driver accepted, no driver ever found (dispatch
+// exhausted), or cancelled before dispatch.
+router.get('/missed-bookings', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT b.id, b.service_type, b.status, b.estimated_fare, b.final_fare,
+              b.created_at, b.driver_id,
+              uc.full_name AS customer_name, uc.mobile AS customer_mobile,
+              CASE
+                WHEN b.driver_id IS NOT NULL THEN 'cancelled_after_assign'
+                WHEN COALESCE(b.dispatch_exhausted, FALSE) THEN 'no_driver'
+                ELSE 'cancelled_before_dispatch'
+              END AS miss_reason
+       FROM bookings b
+       JOIN users uc ON uc.id = b.customer_id
+       WHERE b.status = 'cancelled'
+       ORDER BY b.created_at DESC
+       LIMIT 100`);
+    const no_driver_count = rows.filter(r => r.miss_reason === 'no_driver').length;
+    res.json({ success: true, bookings: rows, no_driver_count });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ─── GET /admin/bonds — DEPRECATED: now returns wallet info ──────────────────
 // The bond model was replaced by the pre-paid wallet. This endpoint is kept for
 // backward compatibility but now reports each driver's wallet balance instead.
