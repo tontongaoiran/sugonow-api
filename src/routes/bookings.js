@@ -678,6 +678,21 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
       } catch (e) { logError('locationNoteSave', e); }
     }
 
+    // Parcel/document delivery details (Deliver service) — shown to the driver.
+    if (service_type === 'delivery') {
+      try {
+        await query(
+          `UPDATE bookings SET parcel_item=$1, recipient_name=$2, recipient_mobile=$3,
+                  pickup_note=$4, dropoff_note=$5 WHERE id=$6`,
+          [ (req.body.parcel_item || '').toString().trim().slice(0, 80) || null,
+            (req.body.recipient_name || '').toString().trim().slice(0, 60) || null,
+            (req.body.recipient_mobile || '').toString().trim().slice(0, 20) || null,
+            (req.body.pickup_note || '').toString().trim().slice(0, 120) || null,
+            (req.body.dropoff_note || '').toString().trim().slice(0, 120) || null,
+            booking.id ]);
+      } catch (e) { logError('parcelDetailsSave', e); }
+    }
+
     // Custom/pasabuy price ceiling (the customer's MAX). Stored so the driver
     // can only buy within it; over-ceiling requires in-app approval.
     if (price_ceiling != null && !isNaN(parseFloat(price_ceiling))) {
@@ -1083,6 +1098,7 @@ router.get('/:id/track', authenticate, async (req, res) => {
               b.dispatch_exhausted, b.eligible_vehicle, b.water_mode, b.lpg_mode,
               b.price_ceiling, b.actual_price, b.price_approval_status, b.price_requested_at,
               b.goods_purchased,
+              b.parcel_item, b.recipient_name, b.recipient_mobile, b.pickup_note, b.dropoff_note,
               COALESCE(b.wallet_credit_used,0) AS wallet_credit_used,
               COALESCE(b.voucher_discount,0) AS voucher_discount,
               dp.current_lat AS driver_lat, dp.current_lng AS driver_lng,
