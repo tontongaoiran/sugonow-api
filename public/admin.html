@@ -1050,6 +1050,8 @@ async function renderMoney(){
       <input id="m-fare-lpg" type="number" value="${df?.lpg??40}"></div>
     <div class="field"><label>Water refill base (₱)</label>
       <input id="m-fare-water" type="number" value="${df?.water??30}"></div>
+    <div class="field"><label>Parcel / document delivery base (₱)</label>
+      <input id="m-fare-delivery" type="number" value="${df?.delivery??20}"></div>
     <div class="field"><label>Custom / pasabuy base (₱)</label>
       <input id="m-fare-custom" type="number" value="${df?.custom??20}">
       <button class="btn btn-green" onclick="saveDeliveryFares()">Save all fares</button></div>
@@ -1143,6 +1145,7 @@ async function saveDeliveryFares(){ try{ await post('/admin/delivery-fares',{
     food:parseFloat(document.getElementById('m-fare-food').value),
     lpg:parseFloat(document.getElementById('m-fare-lpg').value),
     water:parseFloat(document.getElementById('m-fare-water').value),
+    delivery:parseFloat(document.getElementById('m-fare-delivery').value),
     custom:parseFloat(document.getElementById('m-fare-custom').value)}); toast('Fares saved'); }catch(e){ toast(e.message); } }
 async function saveStale(){ try{ await post('/admin/staleness-settings',{dispatch_timeout_sec:parseFloat(document.getElementById('m-dispatch').value),pending_expiry_min:parseFloat(document.getElementById('m-pend').value),driver_stale_min:parseFloat(document.getElementById('m-stale').value)}); toast('Auto-cleanup saved'); }catch(e){ toast(e.message); } }
 async function saveCooldown(){ try{ await post('/admin/cooldown-settings',{active:document.getElementById('cd-active').value==='true',soft_count:+document.getElementById('cd-sc').value,soft_hours:+document.getElementById('cd-sh').value,hard_count:+document.getElementById('cd-hc').value,hard_hours:+document.getElementById('cd-hh').value}); toast('Cooldown saved'); }catch(e){ toast(e.message); } }

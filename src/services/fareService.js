@@ -106,13 +106,15 @@ async function getDeliveryBases() {
   try {
     const { rows } = await query(
       `SELECT key, value FROM app_settings
-       WHERE key IN ('fare_base_food','fare_base_lpg','fare_base_water','fare_base_custom')`);
+       WHERE key IN ('fare_base_food','fare_base_lpg','fare_base_water','fare_base_custom','fare_base_delivery')`);
     const m = {};
     for (const r of rows) { const n = parseFloat(r.value); if (!isNaN(n) && n >= 0) m[r.key] = n; }
     if (m.fare_base_food  != null) { bases.food = m.fare_base_food; bases.delivery = m.fare_base_food; }
     if (m.fare_base_lpg   != null) bases.exchange = m.fare_base_lpg;
     if (m.fare_base_water != null) bases.water = m.fare_base_water;
     if (m.fare_base_custom!= null) bases.custom = m.fare_base_custom;
+    // A dedicated Deliver base overrides the food fallback when set.
+    if (m.fare_base_delivery != null) bases.delivery = m.fare_base_delivery;
   } catch (e) { /* fall back to defaults */ }
   _fareCache = { v: bases, t: Date.now() };
   return bases;
