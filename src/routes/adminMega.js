@@ -797,7 +797,7 @@ router.get('/delivery-fares', async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT key, value FROM app_settings
-       WHERE key IN ('fare_base_food','fare_base_lpg','fare_base_water','fare_base_custom')`);
+       WHERE key IN ('fare_base_food','fare_base_lpg','fare_base_water','fare_base_custom','fare_base_delivery','delivery_origin_lat','delivery_origin_lng')`);
     const m = {}; for (const r of rows) m[r.key] = parseFloat(r.value);
     const z = await query(`SELECT base_fare, per_km_rate FROM zones WHERE slug='flora' LIMIT 1`);
     res.json({ success: true,
@@ -805,13 +805,16 @@ router.get('/delivery-fares', async (req, res) => {
       lpg:    isNaN(m.fare_base_lpg)    ? 40 : m.fare_base_lpg,
       water:  isNaN(m.fare_base_water)  ? 30 : m.fare_base_water,
       custom: isNaN(m.fare_base_custom) ? 20 : m.fare_base_custom,
+      delivery: isNaN(m.fare_base_delivery) ? 20 : m.fare_base_delivery,
+      origin_lat: isNaN(m.delivery_origin_lat) ? 18.2333 : m.delivery_origin_lat,
+      origin_lng: isNaN(m.delivery_origin_lng) ? 121.4200 : m.delivery_origin_lng,
       ride_base: parseFloat(z.rows[0]?.base_fare ?? 25),
       per_km:    parseFloat(z.rows[0]?.per_km_rate ?? 8) });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 router.post('/delivery-fares', async (req, res) => {
   try {
-    const map = { food: 'fare_base_food', lpg: 'fare_base_lpg', water: 'fare_base_water', custom: 'fare_base_custom' };
+    const map = { food: 'fare_base_food', lpg: 'fare_base_lpg', water: 'fare_base_water', custom: 'fare_base_custom', delivery: 'fare_base_delivery' };
     for (const [field, key] of Object.entries(map)) {
       if (req.body[field] === undefined || req.body[field] === null || req.body[field] === '') continue;
       const v = parseFloat(req.body[field]);
@@ -824,6 +827,14 @@ router.post('/delivery-fares', async (req, res) => {
       const pk = parseFloat(req.body.per_km);
       if (isNaN(pk) || pk < 0) return res.status(400).json({ success: false, message: 'Enter 0 or more for per_km.' });
       await query(`UPDATE zones SET per_km_rate=$1 WHERE slug='flora'`, [pk]);
+    }
+    // Delivery origin (Flora town point) for water/LPG/custom distance.
+    for (const [field, key] of [['origin_lat','delivery_origin_lat'],['origin_lng','delivery_origin_lng']]) {
+      if (req.body[field] === undefined || req.body[field] === null || req.body[field] === '') continue;
+      const v = parseFloat(req.body[field]);
+      if (isNaN(v)) return res.status(400).json({ success: false, message: `Enter a valid ${field}.` });
+      const { rowCount } = await query(`UPDATE app_settings SET value=$1 WHERE key=$2`, [String(v), key]);
+      if (rowCount === 0) await query(`INSERT INTO app_settings (key, value) VALUES ($2,$1)`, [String(v), key]);
     }
     res.json({ success: true, message: 'Delivery fares updated.' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }

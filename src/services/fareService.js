@@ -32,13 +32,14 @@ const GOOGLE_KEY = process.env.GOOGLE_MAPS_API_KEY;
 let _fcCache = { v: null, t: 0 };
 async function getFareConfig() {
   if (_fcCache.v && Date.now() - _fcCache.t < 30000) return _fcCache.v;
-  const cfg = { km1: 10, km2: 15, kmN: 20, productPct: 5, productCapCustom: 50, productActive: true, useRoad: true, pickupPerKm: 10, pickupCap: 30, carBase: 60, carPerKm: 25 };
+  const cfg = { km1: 10, km2: 15, kmN: 20, productPct: 5, productCapCustom: 50, productActive: true, useRoad: true, pickupPerKm: 10, pickupCap: 30, carBase: 60, carPerKm: 25, originLat: 18.2333, originLng: 121.4200 };
   try {
     const { rows } = await query(
       `SELECT key, value FROM app_settings
        WHERE key IN ('fare_km1','fare_km2','fare_kmN','product_fee_pct',
                      'product_fee_cap_custom','product_fee_active','fare_use_road_distance',
-                     'pickup_per_km','pickup_fee_cap','car_base_fare','car_per_km')`);
+                     'pickup_per_km','pickup_fee_cap','car_base_fare','car_per_km',
+                     'delivery_origin_lat','delivery_origin_lng')`);
     const m = Object.fromEntries(rows.map(r => [r.key, r.value]));
     if (m.fare_km1 != null && !isNaN(parseFloat(m.fare_km1))) cfg.km1 = parseFloat(m.fare_km1);
     if (m.fare_km2 != null && !isNaN(parseFloat(m.fare_km2))) cfg.km2 = parseFloat(m.fare_km2);
@@ -51,6 +52,8 @@ async function getFareConfig() {
     if (m.pickup_fee_cap != null && !isNaN(parseFloat(m.pickup_fee_cap))) cfg.pickupCap = parseFloat(m.pickup_fee_cap);
     if (m.car_base_fare != null && !isNaN(parseFloat(m.car_base_fare))) cfg.carBase = parseFloat(m.car_base_fare);
     if (m.car_per_km != null && !isNaN(parseFloat(m.car_per_km))) cfg.carPerKm = parseFloat(m.car_per_km);
+    if (m.delivery_origin_lat != null && !isNaN(parseFloat(m.delivery_origin_lat))) cfg.originLat = parseFloat(m.delivery_origin_lat);
+    if (m.delivery_origin_lng != null && !isNaN(parseFloat(m.delivery_origin_lng))) cfg.originLng = parseFloat(m.delivery_origin_lng);
   } catch (e) { /* defaults */ }
   _fcCache = { v: cfg, t: Date.now() };
   return cfg;
@@ -186,10 +189,17 @@ const calculateFare = async ({
   // accuracy (Google Directions, straight-line fallback). Billed per WHOLE km.
   let tripDistKm = 0;
   if (dropLat && dropLng) {
+    // Water, LPG and custom errands have no real customer-chosen pickup — the source
+    // is Flora town. Bill from the admin-set delivery ORIGIN (default Flora poblacion
+    // center) to the drop-off, so far-flung barangays pay for the distance covered.
+    // Rides and food keep their real pickup (merchant/customer location).
+    const townOrigin = ['water', 'exchange', 'lpg', 'custom'].includes(serviceType);
+    const startLat = townOrigin ? fc.originLat : pickupLat;
+    const startLng = townOrigin ? fc.originLng : pickupLng;
     tripDistKm = await roadDistanceKm(
-      pickupLat, pickupLng, dropLat, dropLng,
-      (stopoverLat && stopoverLng) ? stopoverLat : null,
-      (stopoverLat && stopoverLng) ? stopoverLng : null,
+      startLat, startLng, dropLat, dropLng,
+      (!townOrigin && stopoverLat && stopoverLng) ? stopoverLat : null,
+      (!townOrigin && stopoverLat && stopoverLng) ? stopoverLng : null,
       fc.useRoad);
   }
   const billableKm = Math.ceil(tripDistKm - 1e-9);   // round UP to whole km

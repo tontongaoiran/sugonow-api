@@ -1055,6 +1055,12 @@ async function renderMoney(){
     <div class="field"><label>Custom / pasabuy base (₱)</label>
       <input id="m-fare-custom" type="number" value="${df?.custom??20}">
       <button class="btn btn-green" onclick="saveDeliveryFares()">Save all fares</button></div>
+    <div class="note" style="margin-top:8px">Delivery origin for <b>water, LPG & custom</b> — distance for these is billed from this point (Flora town) to the drop-off, since they have no real customer pickup. Set it to your town center / station. Get the numbers by dropping a pin in Google Maps and copying the coordinates.</div>
+    <div class="field"><label>Delivery origin latitude</label>
+      <input id="m-origin-lat" type="number" step="any" value="${df?.origin_lat??18.2333}"></div>
+    <div class="field"><label>Delivery origin longitude</label>
+      <input id="m-origin-lng" type="number" step="any" value="${df?.origin_lng??121.4200}">
+      <button class="btn btn-green" onclick="saveDeliveryFares()">Save origin</button></div>
     <div class="note">Tricycle ride base (₱${df?.ride_base??25}) is set in Zones. Distance is billed using the tiered per-km rates below (the old flat per-km has been retired).</div>
     <div class="section">📍 Tiered per-km & product fee (NEW)</div>
     <div class="note">Distance is billed per WHOLE km (rounded up) using the ACTUAL driving distance pickup→drop-off. The tiered rate replaces the flat per-km above for ALL rides & deliveries: 1st km, 2nd km, then every succeeding km. The product fee adds a % of the product price to the delivery fee for food/water/custom (custom is capped). Applies to NEW bookings within ~30s.</div>
@@ -1146,7 +1152,9 @@ async function saveDeliveryFares(){ try{ await post('/admin/delivery-fares',{
     lpg:parseFloat(document.getElementById('m-fare-lpg').value),
     water:parseFloat(document.getElementById('m-fare-water').value),
     delivery:parseFloat(document.getElementById('m-fare-delivery').value),
-    custom:parseFloat(document.getElementById('m-fare-custom').value)}); toast('Fares saved'); }catch(e){ toast(e.message); } }
+    custom:parseFloat(document.getElementById('m-fare-custom').value),
+    origin_lat:parseFloat(document.getElementById('m-origin-lat').value),
+    origin_lng:parseFloat(document.getElementById('m-origin-lng').value)}); toast('Fares saved'); }catch(e){ toast(e.message); } }
 async function saveStale(){ try{ await post('/admin/staleness-settings',{dispatch_timeout_sec:parseFloat(document.getElementById('m-dispatch').value),pending_expiry_min:parseFloat(document.getElementById('m-pend').value),driver_stale_min:parseFloat(document.getElementById('m-stale').value)}); toast('Auto-cleanup saved'); }catch(e){ toast(e.message); } }
 async function saveCooldown(){ try{ await post('/admin/cooldown-settings',{active:document.getElementById('cd-active').value==='true',soft_count:+document.getElementById('cd-sc').value,soft_hours:+document.getElementById('cd-sh').value,hard_count:+document.getElementById('cd-hc').value,hard_hours:+document.getElementById('cd-hh').value}); toast('Cooldown saved'); }catch(e){ toast(e.message); } }
 
