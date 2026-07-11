@@ -15,7 +15,7 @@ const { sendSms, sendNotificationSms } = require('./smsService');
 const { sendPush } = require('./pushNotificationService');
 
 const DISPATCH_TIMEOUT_SEC = 30;   // fallback; live value from app_settings.dispatch_timeout_sec
-const DISPATCH_BATCH_SIZE  = 3;    // drivers notified per batch
+const DISPATCH_BATCH_SIZE  = 999;  // notify ALL eligible drivers at once (no wave batching for now)
 
 // ── Admin-tunable timings (cached 30s) ──────────────────────────────────────
 // dispatch_timeout_sec: seconds a batch has to accept before rolling over (def 30)
@@ -98,7 +98,7 @@ const notifyDriver = async (booking, driver, serviceLabel) => {
  * Start dispatch for a booking - notify first nearest driver
  */
 const startDispatch = async (booking, zoneId, originLat, originLng, serviceLabel = 'booking') => {
-  const drivers = await getNearestDrivers(zoneId, originLat, originLng, 10, booking.eligible_vehicle || 'any');
+  const drivers = await getNearestDrivers(zoneId, originLat, originLng, 100, booking.eligible_vehicle || 'any');
   if (drivers.length === 0) {
     // No drivers online right now — flag the booking so the revive loop will
     // notify the next driver who comes online (instead of it sitting silent).
