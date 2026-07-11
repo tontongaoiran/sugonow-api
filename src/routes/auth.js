@@ -16,8 +16,7 @@ const jwt     = require('jsonwebtoken');
 const { query, withTransaction } = require('../db/pool');
 const { customerUpload, driverUpload,
         handleUploadError, fileUrl } = require('../middleware/upload');
-const { saveMediaBuffer, saveMediaBase64 } = require('../utils/media');
-const { sendSms, sendPrioritySms } = require('../services/smsService');
+const { sendSms } = require('../services/smsService');
 const { normalizePhone } = require('../utils/phone');
 const { authenticate } = require('../middleware/auth');
 
@@ -27,9 +26,17 @@ const router    = express.Router();
 // (Registration uses multer; in-app photo changes send base64, like the other
 // screenshot uploads in the app.)
 const PROFILE_DIR = path.join(process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads'), 'profiles');
-async function saveProfilePhoto(base64) {
-  // Profile photos now persist in Postgres (no disk volume needed).
-  return saveMediaBase64(base64);
+function saveProfilePhoto(base64) {
+  try {
+    if (!base64 || !base64.startsWith('data:image')) return null;
+    if (!fs.existsSync(PROFILE_DIR)) fs.mkdirSync(PROFILE_DIR, { recursive: true });
+    const m = base64.match(/^data:image\/(\w+);base64,(.+)$/);
+    let ext = 'jpg', data = base64;
+    if (m) { ext = m[1] === 'jpeg' ? 'jpg' : m[1]; data = m[2]; }
+    const fname = `profile_${Date.now()}_${Math.round(Math.random()*1e6)}.${ext}`;
+    fs.writeFileSync(path.join(PROFILE_DIR, fname), Buffer.from(data, 'base64'));
+    return `/uploads/profiles/${fname}`;
+  } catch { return null; }
 }
 const TEST_MODE = process.env.TEST_MODE === 'true';
 
@@ -58,7 +65,7 @@ router.post('/send-otp', async (req, res) => {
       try {
         await query(
           `INSERT INTO otp_codes (mobile, code, purpose, expires_at)
-           VALUES ($1, '123456', $2, NOW() + INTERVAL '5 minutes')`,
+           VALUES ($1, '123456', $2, NOW() + INTERVAL '60 minutes')`,
           [mobile.trim(), purpose]
         );
       } catch (e) {
@@ -72,94 +79,35 @@ router.post('/send-otp', async (req, res) => {
       });
     }
 
-    // ── Resend cooldown ──────────────────────────────────────────────────────
-    // Block another code for this same number + purpose within COOLDOWN_SECONDS
-    // of the last one. The FIRST request always passes (no prior row). The code
-    // already sent stays valid for its full 5 minutes, so the user is never
-    // locked out of a code they already have — this only stops rapid resends.
-    // Side benefit: caps Semaphore SMS spend against double-taps / abuse.
-    const COOLDOWN_SECONDS = 30;
-    const { rows: recentOtp } = await query(
-      `SELECT EXTRACT(EPOCH FROM (NOW() - created_at)) AS age_seconds
-         FROM otp_codes
-        WHERE mobile=$1 AND purpose=$2
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [mobile.trim(), purpose]
-    );
-    if (recentOtp[0] && Number(recentOtp[0].age_seconds) < COOLDOWN_SECONDS) {
-      const retryAfter = Math.ceil(COOLDOWN_SECONDS - Number(recentOtp[0].age_seconds));
-      console.log(`  ⏳ Resend blocked — ${retryAfter}s left on cooldown for ${mobile}`);
-      return res.status(429).json({
-        success: false,
-        cooldown: true,
-        retry_after: retryAfter,
-        message: `Please wait ${retryAfter} second${retryAfter === 1 ? '' : 's'} before requesting another code.`,
-      });
-    }
-
-    // Generate a real 6-digit code. Never emit the reserved test code 123456
-    // as a genuine OTP, so it can only ever mean "test mode".
-    let code = Math.floor(100000 + Math.random() * 900000).toString();
-    while (code === '123456') code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
     console.log('  [1] normalized mobile =', mobile, '| about to INSERT otp_codes');
-
-    // Store the OTP FIRST. This is a fast local DB write and MUST finish before we
-    // reply, because /verify-otp reads the code back out of this table.
     await query(
       `INSERT INTO otp_codes (mobile, code, purpose, expires_at)
        VALUES ($1, $2, $3, NOW() + INTERVAL '5 minutes')`,
       [mobile.trim(), code, purpose]
     );
-    console.log('  [2] otp_codes INSERT ok | replying to app NOW, then sending SMS in background. KEY present =', !!process.env.SEMAPHORE_API_KEY, '| SENDER =', process.env.SEMAPHORE_SENDER);
-
-    // Reply to the app IMMEDIATELY so the loading spinner stops right away.
-    // (This is what fixes the "frozen screen" — the app no longer waits for the
-    // 2-5s Semaphore round-trip before unfreezing.)
+    console.log('  [2] otp_codes INSERT ok | about to call Semaphore. KEY present =', !!process.env.SEMAPHORE_API_KEY, '| SENDER =', process.env.SEMAPHORE_SENDER);
+    const smsResult = await sendSms(mobile.trim(),
+      `SugoNow OTP: ${code}. Valid for 5 minutes.`
+    );
+    console.log('  [3] Semaphore raw response =', JSON.stringify(smsResult));
     res.json({ success: true, message: 'OTP sent via SMS.' });
-
-    // Send the OTP in the BACKGROUND on the PRIORITY route so it skips Semaphore's
-    // shared queue and arrives in seconds (2 credits). The app still doesn't wait.
-    sendPrioritySms(mobile.trim(), `SugoNow OTP: ${code}. Valid for 5 minutes.`)
-      .then((smsResult) => {
-        console.log('  [3] Semaphore raw response =', JSON.stringify(smsResult));
-      })
-      .catch((smsErr) => {
-        // The OTP is already stored, so the user can use "resend" if the text
-        // never arrives. We only log the failure here.
-        console.error('  [3] Semaphore send FAILED (OTP still stored; user can resend):', smsErr.message);
-      });
   } catch (err) {
     console.error('send-otp error:', err.message);
-    // Guard against trying to reply twice: if we already sent the success reply
-    // above, the headers are gone and we must not call res again.
-    if (!res.headersSent) {
-      res.status(500).json({ success: false, message: 'Could not send OTP.' });
-    }
+    res.status(500).json({ success: false, message: 'Could not send OTP.' });
   }
 });
 
 // ─── verifyOtpInternal (PATCHED to accept ANY OTP in test mode) ──────────────
-// consume=true (default): on a valid match, mark the code used (one-time use).
-// consume=false: validate WITHOUT marking it used — for multi-step UIs that need
-// to check a code mid-flow and still let the final step verify-and-consume it.
-const verifyOtpInternal = async (mobile, otp, purpose, consume = true) => {
+const verifyOtpInternal = async (mobile, otp, purpose) => {
   mobile = normalizePhone(mobile) || (mobile || '').trim();
   const cleanOtp = (otp || '').toString().trim();
-  console.log(`  🔑 OTP check — TEST_MODE: ${TEST_MODE} | mobile: ${mobile} | otp: "${cleanOtp}" | consume: ${consume}`);
+  console.log(`  🔑 OTP check — TEST_MODE: ${TEST_MODE} | mobile: ${mobile} | otp: "${cleanOtp}"`);
 
   // In TEST MODE, accept ANY OTP since no real SMS is sent
   if (TEST_MODE) {
     console.log('  ✅ TEST MODE — accepting any OTP');
     return true;
-  }
-
-  // Belt-and-suspenders: 123456 is the reserved TEST-MODE code and is never a
-  // valid real OTP. Refuse it outright in production, so even a stale test-mode
-  // row left in otp_codes can never be used to pass verification.
-  if (cleanOtp === '123456') {
-    console.log('  ✋ Production mode — refusing reserved test code 123456');
-    return false;
   }
 
   // Production mode — strict verification
@@ -171,9 +119,7 @@ const verifyOtpInternal = async (mobile, otp, purpose, consume = true) => {
     [mobile.trim(), cleanOtp, purpose]
   );
   if (rows[0]) {
-    if (consume) {
-      await query('UPDATE otp_codes SET is_used=TRUE WHERE id=$1', [rows[0].id]);
-    }
+    await query('UPDATE otp_codes SET is_used=TRUE WHERE id=$1', [rows[0].id]);
     return true;
   }
   return false;
@@ -188,25 +134,6 @@ router.post('/verify-otp', async (req, res) => {
     res.json({ success: valid });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// ─── POST /auth/check-otp ─────────────────────────────────────────────────────
-// Non-consuming OTP check. Lets a multi-step screen (e.g. forgot-password step 2)
-// validate the code the moment it's entered WITHOUT marking it used, so the final
-// step can still verify-and-consume it. Honors TEST_MODE and the 123456 guard.
-router.post('/check-otp', async (req, res) => {
-  try {
-    const { otp, purpose = 'registration' } = req.body;
-    let { mobile } = req.body;
-    if (!mobile || !otp) {
-      return res.status(400).json({ success: false, valid: false, message: 'Mobile and OTP are required.' });
-    }
-    mobile = normalizePhone(mobile) || (mobile || '').trim();
-    const valid = await verifyOtpInternal(mobile, otp, purpose, false); // false = do NOT consume
-    res.json({ success: true, valid });
-  } catch (err) {
-    res.status(500).json({ success: false, valid: false, message: err.message });
   }
 });
 
@@ -272,7 +199,7 @@ router.post('/register-customer',
       const passwordHash = await bcrypt.hash(password, 12);
 
       const profilePhoto = req.files?.profile_photo?.[0];
-      const profileUrl   = profilePhoto ? await saveMediaBuffer(profilePhoto.buffer, profilePhoto.mimetype) : null;
+      const profileUrl   = profilePhoto ? fileUrl(profilePhoto.filename) : null;
 
       const { rows } = await query(
         `INSERT INTO users
@@ -343,7 +270,7 @@ router.post('/register-driver',
       // Normalize the vehicle type: trim + lowercase + whitelist. A stray
       // space here once made a driver invisible to dispatch — never again.
       vehicle_type = String(vehicle_type || 'tricycle').trim().toLowerCase();
-      if (!['tricycle', 'motorcycle'].includes(vehicle_type)) vehicle_type = 'tricycle';
+      if (!['tricycle', 'motorcycle', 'car'].includes(vehicle_type)) vehicle_type = 'tricycle';
 
       console.log('🛺 Driver signup:', { full_name, mobile, plate_no });
 
@@ -382,12 +309,6 @@ router.post('/register-driver',
       const zoneId       = zoneRow.rows[0]?.id || null;
       const passwordHash = await bcrypt.hash(password, 12);
 
-      // Store driver photos in Postgres (survive redeploys) -> /media/<id> URLs.
-      const photoUrl   = await saveMediaBuffer(photo.buffer,   photo.mimetype);
-      const idFrontUrl = await saveMediaBuffer(idFront.buffer, idFront.mimetype);
-      const idBackUrl  = await saveMediaBuffer(idBack.buffer,  idBack.mimetype);
-      const selfieUrl  = await saveMediaBuffer(selfie.buffer,  selfie.mimetype);
-
       await withTransaction(async (client) => {
         const { rows: uRows } = await client.query(
           `INSERT INTO users
@@ -397,7 +318,7 @@ router.post('/register-driver',
            RETURNING id`,
           [
             full_name.trim(), mobile.trim(), passwordHash,
-            zoneId, barangay || null, photoUrl,
+            zoneId, barangay || null, fileUrl(photo.filename),
           ]
         );
         const userId = uRows[0].id;
@@ -411,8 +332,8 @@ router.post('/register-driver',
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending',$11,$12,$13)`,
           [
             userId, plate_no.toUpperCase().trim(), id_type,
-            idFrontUrl, idBackUrl, selfieUrl,
-            vehicle_type, vehicle_color, vehicle_model, photoUrl,
+            fileUrl(idFront.filename), fileUrl(idBack.filename), fileUrl(selfie.filename),
+            vehicle_type, vehicle_color, vehicle_model, fileUrl(photo.filename),
             reg_lat ? parseFloat(reg_lat) : null,
             reg_lng ? parseFloat(reg_lng) : null,
             (reg_address || '').trim().slice(0, 200) || null,
@@ -486,7 +407,7 @@ router.post('/register-merchant',
       const passwordHash = await bcrypt.hash(password, 12);
 
       const photo = req.files?.profile_photo?.[0];
-      const photoUrl = photo ? await saveMediaBuffer(photo.buffer, photo.mimetype) : null;
+      const photoUrl = photo ? fileUrl(photo.filename) : null;
 
       await withTransaction(async (client) => {
         const { rows: uRows } = await client.query(
@@ -695,7 +616,7 @@ router.patch('/me', authenticate, async (req, res) => {
     if (email != null) { vals.push(email.trim() || null); sets.push(`email=$${vals.length}`); }
     let newPhotoUrl = null;
     if (profile_photo_base64) {
-      newPhotoUrl = await saveProfilePhoto(profile_photo_base64);
+      newPhotoUrl = saveProfilePhoto(profile_photo_base64);
       if (!newPhotoUrl) return res.status(400).json({ success: false, message: 'Could not save the photo. Please try another image.' });
       vals.push(newPhotoUrl); sets.push(`profile_photo=$${vals.length}`);
     }
@@ -739,12 +660,10 @@ router.post('/change-mobile/request', authenticate, async (req, res) => {
     await query(
       `INSERT INTO otp_codes (mobile, code, purpose, expires_at)
        VALUES ($1,$2,'change_mobile', NOW() + INTERVAL '10 minutes')`, [new_mobile, code]);
-    // Reply immediately so the screen doesn't freeze, then send the OTP in the
-    // background on the PRIORITY route (essential SMS, not gated by NOTIFICATION_SMS).
+    // OTP is essential SMS — always sends (not gated by NOTIFICATION_SMS).
+    await sendSms(new_mobile, `SugoNow: Your code to change your number is ${code}. Valid 10 minutes.`);
     res.json({ success: true, message: 'We sent a code to the new number.' });
-    sendPrioritySms(new_mobile, `SugoNow: Your code to change your number is ${code}. Valid 10 minutes.`)
-      .catch((e) => console.error('  ❌ change-mobile OTP send failed:', e.message));
-  } catch (err) { if (!res.headersSent) res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // Step 2: verify the OTP and switch the number.
