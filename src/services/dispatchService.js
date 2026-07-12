@@ -301,7 +301,7 @@ async function expireStaleBookings() {
     if (!(mins > 0)) return;  // 0/blank disables auto-expiry
     const { rows } = await query(
       `UPDATE bookings SET status='cancelled', updated_at=NOW()
-       WHERE status='pending'
+       WHERE status='pending' AND driver_id IS NULL
          AND created_at < NOW() - ($1 || ' minutes')::interval
        RETURNING id, customer_id`, [String(mins)]);
     for (const b of rows) {
