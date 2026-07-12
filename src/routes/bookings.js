@@ -1128,7 +1128,7 @@ router.get('/:id/track', authenticate, async (req, res) => {
         `SELECT id, product_name, quantity, unit_price, options_text, status
          FROM order_items
          WHERE booking_id=$1 AND (status='ok' OR status IS NULL)
-         ORDER BY id`, [req.params.id]);
+         ORDER BY created_at, id`, [req.params.id]);
       trk.order_items = items;
     } catch (e) { /* non-fatal — checklist just won't refresh this tick */ }
     res.json({ success: true, tracking: trk });
@@ -1583,7 +1583,7 @@ router.get('/active', authenticate, requireVerifiedDriver, async (req, res) => {
     if (booking) {
       const { rows: items } = await query(
         `SELECT id, product_name, quantity, unit_price, options_text, status
-         FROM order_items WHERE booking_id=$1 ORDER BY created_at`,
+         FROM order_items WHERE booking_id=$1 ORDER BY created_at, id`,
         [booking.id]
       );
       booking.order_items = items;
