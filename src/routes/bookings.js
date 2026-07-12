@@ -894,7 +894,7 @@ router.patch('/:id/accept', authenticate, requireVerifiedDriver, async (req, res
       [req.params.id, req.user.id]
     );
     await query(
-      `UPDATE dispatch_attempts SET status='cancelled', responded_at=NOW()
+      `UPDATE dispatch_attempts SET status='expired', responded_at=NOW()
        WHERE booking_id=$1 AND driver_id<>$2 AND status='notified'`,
       [req.params.id, req.user.id]
     );
