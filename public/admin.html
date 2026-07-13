@@ -450,7 +450,7 @@ async function renderVehicleApprovals(){
   }catch(e){ el.innerHTML=''; }
 }
 async function approveVehicle(id){
-  if(!confirm('Approve this vehicle type change? It will take effect for the driver\\'s bookings.'))return;
+  if(!confirm("Approve this vehicle type change? It takes effect for that driver right away."))return;
   try{ await patch('/drivers/vehicles/'+id+'/verify',{}); toast('Vehicle approved'); renderVehicleApprovals(); }
   catch(e){ toast(e.message||'Could not approve'); }
 }
