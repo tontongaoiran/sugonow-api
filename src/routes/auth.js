@@ -16,6 +16,7 @@ const jwt     = require('jsonwebtoken');
 const { query, withTransaction } = require('../db/pool');
 const { customerUpload, driverUpload,
         handleUploadError, fileUrl } = require('../middleware/upload');
+const { saveMediaBuffer } = require('../utils/media');
 const { sendSms } = require('../services/smsService');
 const { normalizePhone } = require('../utils/phone');
 const { authenticate } = require('../middleware/auth');
@@ -199,7 +200,7 @@ router.post('/register-customer',
       const passwordHash = await bcrypt.hash(password, 12);
 
       const profilePhoto = req.files?.profile_photo?.[0];
-      const profileUrl   = profilePhoto ? fileUrl(profilePhoto.filename) : null;
+      const profileUrl   = profilePhoto ? await saveMediaBuffer(profilePhoto.buffer, profilePhoto.mimetype) : null;
 
       const { rows } = await query(
         `INSERT INTO users
@@ -318,7 +319,7 @@ router.post('/register-driver',
            RETURNING id`,
           [
             full_name.trim(), mobile.trim(), passwordHash,
-            zoneId, barangay || null, fileUrl(photo.filename),
+            zoneId, barangay || null, await saveMediaBuffer(photo.buffer, photo.mimetype),
           ]
         );
         const userId = uRows[0].id;
@@ -332,8 +333,8 @@ router.post('/register-driver',
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending',$11,$12,$13)`,
           [
             userId, plate_no.toUpperCase().trim(), id_type,
-            fileUrl(idFront.filename), fileUrl(idBack.filename), fileUrl(selfie.filename),
-            vehicle_type, vehicle_color, vehicle_model, fileUrl(photo.filename),
+            await saveMediaBuffer(idFront.buffer, idFront.mimetype), await saveMediaBuffer(idBack.buffer, idBack.mimetype), await saveMediaBuffer(selfie.buffer, selfie.mimetype),
+            vehicle_type, vehicle_color, vehicle_model, await saveMediaBuffer(photo.buffer, photo.mimetype),
             reg_lat ? parseFloat(reg_lat) : null,
             reg_lng ? parseFloat(reg_lng) : null,
             (reg_address || '').trim().slice(0, 200) || null,
@@ -407,7 +408,7 @@ router.post('/register-merchant',
       const passwordHash = await bcrypt.hash(password, 12);
 
       const photo = req.files?.profile_photo?.[0];
-      const photoUrl = photo ? fileUrl(photo.filename) : null;
+      const photoUrl = photo ? await saveMediaBuffer(photo.buffer, photo.mimetype) : null;
 
       await withTransaction(async (client) => {
         const { rows: uRows } = await client.query(
