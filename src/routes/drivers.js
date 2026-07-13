@@ -70,13 +70,33 @@ const VALID_CLASSES = ['motorcycle', 'tricycle', 'car'];
 // GET /drivers/vehicles — the driver's vehicles + which is active
 router.get('/vehicles', authenticate, requireRole('driver'), async (req, res) => {
   try {
-    const { rows } = await query(
-      `SELECT v.id, v.vehicle_class, v.plate_number, v.model, v.color, v.verified,
+    const vehQuery = `SELECT v.id, v.vehicle_class, v.plate_number, v.model, v.color, v.verified,
               (v.id = dp.active_vehicle_id) AS is_active
          FROM driver_vehicles v
          JOIN driver_profiles dp ON dp.user_id = v.driver_id
         WHERE v.driver_id = $1
-        ORDER BY is_active DESC, v.created_at ASC`, [req.user.id]);
+        ORDER BY is_active DESC, v.created_at ASC`;
+    let { rows } = await query(vehQuery, [req.user.id]);
+    // Auto-heal: a driver who registered before the vehicles table (or whose
+    // registration only filled driver_profiles) has no vehicle row yet. Create
+    // their first vehicle from their registration details and make it active.
+    if (rows.length === 0) {
+      const { rows: dp } = await query(
+        `SELECT vehicle_type, plate_number, vehicle_model, vehicle_color
+           FROM driver_profiles WHERE user_id = $1`, [req.user.id]);
+      if (dp[0]) {
+        const raw = String(dp[0].vehicle_type || '').trim().toLowerCase();
+        const cls = VALID_CLASSES.includes(raw) ? raw : 'tricycle';
+        const { rows: nv } = await query(
+          `INSERT INTO driver_vehicles (driver_id, vehicle_class, plate_number, model, color, verified)
+           VALUES ($1,$2,$3,$4,$5,TRUE) RETURNING id`,
+          [req.user.id, cls, dp[0].plate_number || null, dp[0].vehicle_model || null, dp[0].vehicle_color || null]);
+        await query(
+          `UPDATE driver_profiles SET active_vehicle_id = $1
+            WHERE user_id = $2 AND active_vehicle_id IS NULL`, [nv[0].id, req.user.id]);
+        ({ rows } = await query(vehQuery, [req.user.id]));
+      }
+    }
     res.json({ success: true, vehicles: rows });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
