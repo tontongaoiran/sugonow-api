@@ -70,23 +70,6 @@ const VALID_CLASSES = ['motorcycle', 'tricycle', 'car'];
 // GET /drivers/vehicles — the driver's vehicles + which is active
 router.get('/vehicles', authenticate, requireRole('driver'), async (req, res) => {
   try {
-    // Auto-heal: a driver who registered before/without a vehicle row (e.g. a brand-
-    // new driver) gets one created from their current vehicle_type, set active. This
-    // makes their registration vehicle appear here and stay dispatchable.
-    const { rows: have } = await query(
-      `SELECT 1 FROM driver_vehicles WHERE driver_id=$1 LIMIT 1`, [req.user.id]);
-    if (!have[0]) {
-      const { rows: dp } = await query(
-        `SELECT COALESCE(NULLIF(TRIM(LOWER(vehicle_type)),''),'tricycle') AS cls, plate_number
-           FROM driver_profiles WHERE user_id=$1`, [req.user.id]);
-      if (dp[0]) {
-        const { rows: nv } = await query(
-          `INSERT INTO driver_vehicles (driver_id, vehicle_class, plate_number, verified)
-           VALUES ($1,$2,$3,TRUE) RETURNING id`, [req.user.id, dp[0].cls, dp[0].plate_number]);
-        await query(`UPDATE driver_profiles SET active_vehicle_id=$1 WHERE user_id=$2 AND active_vehicle_id IS NULL`,
-          [nv[0].id, req.user.id]);
-      }
-    }
     const { rows } = await query(
       `SELECT v.id, v.vehicle_class, v.plate_number, v.model, v.color, v.verified,
               (v.id = dp.active_vehicle_id) AS is_active
@@ -129,15 +112,77 @@ router.post('/vehicles', authenticate, requireRole('driver'), async (req, res) =
 router.patch('/vehicles/:id/activate', authenticate, requireRole('driver'), async (req, res) => {
   try {
     const { rows } = await query(
-      `SELECT vehicle_class, plate_number FROM driver_vehicles
+      `SELECT vehicle_class, plate_number, verified FROM driver_vehicles
         WHERE id=$1 AND driver_id=$2`, [req.params.id, req.user.id]);
     if (!rows[0]) return res.status(404).json({ success: false, message: 'Vehicle not found.' });
+    if (rows[0].verified === false)
+      return res.status(400).json({ success: false, message: 'This vehicle is awaiting admin approval and cannot be set active yet.' });
     await query(
       `UPDATE driver_profiles
           SET active_vehicle_id=$1, vehicle_type=$2, plate_number=COALESCE($3, plate_number)
         WHERE user_id=$4`,
       [req.params.id, rows[0].vehicle_class, rows[0].plate_number, req.user.id]);
     res.json({ success: true, message: `Now driving your ${rows[0].vehicle_class}.`, vehicle_class: rows[0].vehicle_class });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// PATCH /drivers/vehicles/:id — edit a vehicle. Plate/model/color update instantly.
+// A vehicle-TYPE change needs admin re-approval before it affects dispatch: the new
+// type is recorded but the vehicle is marked UNVERIFIED, and the dispatch mirror
+// (driver_profiles.vehicle_type) is left on the old type until an admin approves.
+router.patch('/vehicles/:id', authenticate, requireRole('driver'), async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT vehicle_class FROM driver_vehicles WHERE id=$1 AND driver_id=$2`,
+      [req.params.id, req.user.id]);
+    if (!rows[0]) return res.status(404).json({ success: false, message: 'Vehicle not found.' });
+    const curClass = rows[0].vehicle_class;
+    const newClass = req.body.vehicle_class ? String(req.body.vehicle_class).trim().toLowerCase() : null;
+    const plate = (req.body.plate_number || '').trim() || null;
+    const model = (req.body.model || '').trim() || null;
+    const color = (req.body.color || '').trim() || null;
+    await query(
+      `UPDATE driver_vehicles SET plate_number=COALESCE($1,plate_number), model=$2, color=$3
+        WHERE id=$4 AND driver_id=$5`,
+      [plate, model, color, req.params.id, req.user.id]);
+    const typeChanged = newClass && VALID_CLASSES.includes(newClass) && newClass !== curClass;
+    if (typeChanged) {
+      await query(
+        `UPDATE driver_vehicles SET vehicle_class=$1, verified=FALSE WHERE id=$2 AND driver_id=$3`,
+        [newClass, req.params.id, req.user.id]);
+      return res.json({ success: true, pending: true,
+        message: `Vehicle details saved. Your TYPE change to ${newClass} was submitted for admin approval and takes effect for bookings once approved.` });
+    }
+    res.json({ success: true, message: 'Vehicle updated.' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// GET /drivers/vehicles/pending — ADMIN: vehicles awaiting approval (e.g. type changes).
+router.get('/vehicles/pending', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT v.id, v.vehicle_class, v.plate_number, v.model, v.color,
+              u.full_name, u.mobile
+         FROM driver_vehicles v JOIN users u ON u.id = v.driver_id
+        WHERE v.verified = FALSE
+        ORDER BY v.id DESC`);
+    res.json({ success: true, vehicles: rows });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// PATCH /drivers/vehicles/:id/verify — ADMIN approves a vehicle (after a type change).
+router.patch('/vehicles/:id/verify', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT driver_id, vehicle_class FROM driver_vehicles WHERE id=$1`, [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ success: false, message: 'Vehicle not found.' });
+    await query(`UPDATE driver_vehicles SET verified=TRUE WHERE id=$1`, [req.params.id]);
+    // If it's the driver's ACTIVE vehicle, sync the dispatch mirror to the approved type.
+    await query(
+      `UPDATE driver_profiles SET vehicle_type=$1
+        WHERE user_id=$2 AND active_vehicle_id=$3`,
+      [rows[0].vehicle_class, rows[0].driver_id, req.params.id]);
+    res.json({ success: true, message: 'Vehicle approved.' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 

@@ -432,11 +432,34 @@ async function loadOnlineDrivers(){
 
 // ====================== APPROVALS (merchant store applications) ======================
 let apprTab='pending';
+async function renderVehicleApprovals(){
+  const el=document.getElementById('veh-appr'); if(!el) return;
+  try{
+    const r=await get('/drivers/vehicles/pending'); const list=r.vehicles||[];
+    if(!list.length){ el.innerHTML=''; return; }
+    el.innerHTML = `<div class="card" style="margin-bottom:14px;border:1px solid #D2A837">
+      <h3>🚗 Vehicle type changes awaiting approval</h3>
+      <table><tr><th>Driver</th><th>New type</th><th>Plate</th><th>Details</th><th></th></tr>`+
+      list.map(v=>`<tr>
+        <td>${esc(v.full_name||'—')}${v.mobile?`<div class="note">📞 ${esc(v.mobile)}</div>`:''}</td>
+        <td><b>${esc(v.vehicle_class)}</b></td>
+        <td>${esc(v.plate_number||'—')}</td>
+        <td>${esc([v.model,v.color].filter(Boolean).join(' · ')||'—')}</td>
+        <td><button class="btn btn-green" onclick="approveVehicle('${v.id}')">Approve</button></td></tr>`).join('')+
+      `</table></div>`;
+  }catch(e){ el.innerHTML=''; }
+}
+async function approveVehicle(id){
+  if(!confirm('Approve this vehicle type change? It will take effect for the driver\\'s bookings.'))return;
+  try{ await patch('/drivers/vehicles/'+id+'/verify',{}); toast('Vehicle approved'); renderVehicleApprovals(); }
+  catch(e){ toast(e.message||'Could not approve'); }
+}
 async function renderApprovals(){
   setContent(`<div class="toolbar">
       <span class="subtab ${apprTab==='pending'?'active':''}" onclick="apprTab='pending';renderApprovals()">Pending</span>
       <span class="subtab ${apprTab==='approved'?'active':''}" onclick="apprTab='approved';renderApprovals()">Approved</span>
-    </div><div id="appr-body"><div class="loading">Loading…</div></div>`);
+    </div><div id="veh-appr"></div><div id="appr-body"><div class="loading">Loading…</div></div>`);
+  renderVehicleApprovals();
   const body=document.getElementById('appr-body');
   try{
     const r = await get('/merchant/admin/applications?status='+apprTab);
