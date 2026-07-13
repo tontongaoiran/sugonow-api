@@ -157,6 +157,25 @@ router.patch('/vehicles/:id', authenticate, requireRole('driver'), async (req, r
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// DELETE /drivers/vehicles/:id — remove a vehicle. Blocked for the ACTIVE vehicle
+// (switch first) and the driver's LAST vehicle (they must keep at least one).
+router.delete('/vehicles/:id', authenticate, requireRole('driver'), async (req, res) => {
+  try {
+    const { rows: prof } = await query(
+      `SELECT active_vehicle_id FROM driver_profiles WHERE user_id=$1`, [req.user.id]);
+    if (prof[0] && String(prof[0].active_vehicle_id) === String(req.params.id))
+      return res.status(400).json({ success: false, message: 'You cannot remove the vehicle you are currently driving. Set another vehicle active first.' });
+    const { rows: cnt } = await query(
+      `SELECT COUNT(*)::int AS n FROM driver_vehicles WHERE driver_id=$1`, [req.user.id]);
+    if ((cnt[0]?.n || 0) <= 1)
+      return res.status(400).json({ success: false, message: 'You need at least one vehicle. Add another before removing this one.' });
+    const { rowCount } = await query(
+      `DELETE FROM driver_vehicles WHERE id=$1 AND driver_id=$2`, [req.params.id, req.user.id]);
+    if (rowCount === 0) return res.status(404).json({ success: false, message: 'Vehicle not found.' });
+    res.json({ success: true, message: 'Vehicle removed.' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // GET /drivers/vehicles/pending — ADMIN: vehicles awaiting approval (e.g. type changes).
 router.get('/vehicles/pending', authenticate, requireRole('admin'), async (req, res) => {
   try {
