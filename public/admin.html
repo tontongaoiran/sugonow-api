@@ -1367,15 +1367,25 @@ async function renderLandmarks(){
   try{
     const sp = lmTab==='all'?'':('?status='+lmTab);
     const r=await get('/landmarks/admin/list'+sp); const list=r.landmarks||[];
-    body.innerHTML = list.length? `<table><tr><th>Name</th><th>Category</th><th>Coords</th><th>Status</th><th>Action</th></tr>`+
+    body.innerHTML = list.length? `<table><tr><th>Name</th><th>Category</th><th>Suggested by</th><th>Coords</th><th>Status</th><th>Action</th></tr>`+
       list.map(l=>`<tr><td><b>${esc(l.name)}</b>${l.address_hint?'<br><span class=note>'+esc(l.address_hint)+'</span>':''}</td>
-        <td>${esc(l.category)}</td><td>${parseFloat(l.lat).toFixed(5)}, ${parseFloat(l.lng).toFixed(5)}</td>
+        <td>${esc(l.category)}</td>
+        <td>${l.suggested_by_name?esc(l.suggested_by_name)+(l.suggested_by_role?` <span class="tag ${l.suggested_by_role==='driver'?'tag-busy':'tag-on'}">${esc(l.suggested_by_role)}</span>`:''):'<span class=note>admin</span>'}</td>
+        <td>${parseFloat(l.lat).toFixed(5)}, ${parseFloat(l.lng).toFixed(5)}</td>
         <td><span class="tag ${l.status==='approved'?'tag-on':l.status==='pending'?'tag-busy':'tag-off'}">${esc(l.status)}</span></td>
-        <td>${l.status!=='approved'?`<button class="btn btn-green" onclick="lmApprove('${l.id}')">✓</button>`:''}
+        <td><button class="btn" onclick="lmRename('${l.id}','${jsq(l.name)}')">✎ Rename</button>
+            ${l.status!=='approved'?`<button class="btn btn-green" onclick="lmApprove('${l.id}')">✓</button>`:''}
             ${l.status==='pending'?`<button class="btn btn-amber" onclick="lmReject('${l.id}')">✕</button>`:''}
             <button class="btn btn-red" onclick="lmDelete('${l.id}','${jsq(l.name)}')">🗑</button></td></tr>`).join('')+`</table>`
       : '<div class="empty">No landmarks here.</div>';
   }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+}
+async function lmRename(id, current){
+  const name = prompt('Correct the place name (customers will see this):', current);
+  if(name===null) return;
+  if(!name.trim()){ toast('Name cannot be empty'); return; }
+  try{ await post('/landmarks/admin/'+id+'/rename',{name:name.trim()}); toast('Renamed'); renderLandmarks(); }
+  catch(e){ toast(e.message||'Could not rename'); }
 }
 async function lmApprove(id){ try{ await post('/landmarks/admin/'+id+'/approve'); toast('Approved'); renderLandmarks(); }catch(e){ toast(e.message); } }
 async function lmReject(id){ try{ await post('/landmarks/admin/'+id+'/reject'); toast('Rejected'); renderLandmarks(); }catch(e){ toast(e.message); } }

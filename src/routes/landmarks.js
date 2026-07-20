@@ -109,10 +109,10 @@ router.get('/admin/list', requireRole('admin'), async (req, res) => {
   try {
     const status = req.query.status; // 'pending' | 'approved' | 'rejected' | undefined(all)
     const rows = status
-      ? (await query(`SELECT l.*, u.full_name AS suggested_by_name
+      ? (await query(`SELECT l.*, u.full_name AS suggested_by_name, u.role AS suggested_by_role
                       FROM landmarks l LEFT JOIN users u ON u.id=l.suggested_by
                       WHERE l.status=$1 ORDER BY l.created_at DESC`, [status])).rows
-      : (await query(`SELECT l.*, u.full_name AS suggested_by_name
+      : (await query(`SELECT l.*, u.full_name AS suggested_by_name, u.role AS suggested_by_role
                       FROM landmarks l LEFT JOIN users u ON u.id=l.suggested_by
                       ORDER BY l.status, l.name`)).rows;
     res.json({ success: true, landmarks: rows });
@@ -147,6 +147,24 @@ router.post('/admin/:id/reject', requireRole('admin'), async (req, res) => {
   try {
     await query(`UPDATE landmarks SET status='rejected', approved_by=$1 WHERE id=$2`,
       [req.user.id, req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Admin: rename / correct a landmark's name (and optionally category/hint) — fixes a
+// misspelled place before customers ever see it. Works on pending OR approved landmarks.
+router.post('/admin/:id/rename', requireRole('admin'), async (req, res) => {
+  try {
+    const name = (req.body.name || '').trim();
+    if (!name) return res.status(400).json({ success: false, message: 'name required.' });
+    const cat  = (req.body.category || '').trim() || null;
+    const hint = (req.body.address_hint || '').trim() || null;
+    await query(
+      `UPDATE landmarks SET name=$1,
+              category=COALESCE($2, category),
+              address_hint=COALESCE($3, address_hint)
+        WHERE id=$4`,
+      [name, cat, hint, req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
