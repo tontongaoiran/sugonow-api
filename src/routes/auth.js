@@ -162,6 +162,14 @@ router.post('/register-customer',
           message: 'Name, mobile, and password are required.',
         });
       }
+      // New customers must give a first AND last name (a single word isn't enough).
+      // This does not affect existing accounts — it only validates new signups.
+      if (String(full_name).trim().split(/\s+/).filter(Boolean).length < 2) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please enter both your first and last name.',
+        });
+      }
       const normMobile = normalizePhone(mobile);
       if (!normMobile) {
         return res.status(400).json({
