@@ -193,6 +193,37 @@ router.get('/bookings', async (req, res) => {
   }
 });
 
+// ─── GET /admin/bookings/:id — full detail for one booking ──────────────────
+// Powers the web admin's booking detail view: every booking column (fares, fees,
+// notes, parcel/recipient info), the customer & driver, the merchant, and the
+// itemised products with their line totals.
+router.get('/bookings/:id', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT b.*,
+              uc.full_name AS customer_name, uc.mobile AS customer_mobile,
+              ud.full_name AS driver_name,   ud.mobile AS driver_mobile,
+              (SELECT bz.name FROM order_items oi
+                 JOIN menu_items mi ON mi.id = oi.product_id
+                 JOIN businesses bz ON bz.id = mi.business_id
+                WHERE oi.booking_id = b.id AND bz.owner_id IS NOT NULL
+                LIMIT 1) AS merchant_name
+         FROM bookings b
+         JOIN users uc ON uc.id = b.customer_id
+         LEFT JOIN users ud ON ud.id = b.driver_id
+        WHERE b.id = $1`, [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ success: false, message: 'Booking not found.' });
+
+    const { rows: items } = await query(
+      `SELECT product_name, quantity, unit_price, options_text, status
+         FROM order_items WHERE booking_id = $1 ORDER BY created_at, id`, [req.params.id]);
+
+    res.json({ success: true, booking: rows[0], items });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ─── GET /admin/missed-bookings — cancelled bookings, with a reason ──────────
 // Powers the web admin "Missed / no-driver" subtab. Classifies each cancelled
 // booking: cancelled after a driver accepted, no driver ever found (dispatch

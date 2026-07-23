@@ -916,7 +916,7 @@ async function renderBookings(){
       return b.dropoff_address||b.pickup_address||'—';
     };
     body.innerHTML = list.length? `<table><tr><th>When</th><th>Service</th><th>Merchant / Destination</th><th>Customer</th><th>Driver</th><th>Fare</th><th>Status</th></tr>`+
-      list.slice(0,200).map(b=>`<tr>
+      list.slice(0,200).map(b=>`<tr style="cursor:pointer" onclick="openBooking('${b.id}')" title="Click to see full details">
         <td>${b.created_at?new Date(b.created_at).toLocaleString():'—'}</td>
         <td>${esc(b.service_type||'—')}</td>
         <td>${esc(whereOf(b))}</td>
@@ -926,6 +926,93 @@ async function renderBookings(){
         <td><span class="tag ${b.status==='completed'?'tag-on':b.status==='cancelled'?'tag-off':'tag-busy'}">${esc(b.status)}</span></td>
       </tr>`).join('')+`</table>` : '<div class="empty">No bookings yet.</div>';
   }catch(e){ body.innerHTML='<div class="empty">Could not load.</div>'; }
+}
+
+// Full detail for one booking — opened by clicking a row in the bookings table.
+async function openBooking(id){
+  const body=document.getElementById('bk-body'); if(!body) return;
+  body.innerHTML='<div class="loading">Loading…</div>';
+  try{
+    const r=await get('/admin/bookings/'+id);
+    const b=r.booking||{}, items=r.items||[];
+    const has=(v)=> !(v===null||v===undefined||v===''||v===false);
+    const row=(lbl,val,bold)=> has(val)
+      ? `<tr><td style="color:var(--muted)">${lbl}</td><td style="text-align:right${bold?';font-weight:800':''}">${val}</td></tr>` : '';
+    const dt=(v)=> v?new Date(v).toLocaleString():null;
+    const n=(v)=> parseFloat(v||0);
+
+    const itemsTotal = items.reduce((t,i)=> t + n(i.unit_price)*n(i.quantity), 0);
+    const productsCard = items.length ? `
+      <div class="card" style="margin-top:12px">
+        <h3>🛒 Products ordered (${items.length})</h3>
+        <table><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit</th><th style="text-align:right">Line total</th></tr>
+        ${items.map(i=>`<tr>
+          <td><b>${esc(i.product_name||'—')}</b>${i.options_text?'<br><span class="note">'+esc(i.options_text)+'</span>':''}${(i.status&&i.status!=='ok')?' <span class="tag tag-off">'+esc(i.status)+'</span>':''}</td>
+          <td style="text-align:center">${esc(String(i.quantity||0))}</td>
+          <td style="text-align:right">${peso(i.unit_price)}</td>
+          <td style="text-align:right">${peso(n(i.unit_price)*n(i.quantity))}</td></tr>`).join('')}
+        <tr><td colspan="3" style="text-align:right;font-weight:800">Products total</td>
+            <td style="text-align:right;font-weight:800">${peso(itemsTotal)}</td></tr>
+        </table>
+      </div>` : '';
+
+    const notesCard = (has(b.pickup_address)||has(b.dropoff_address)||has(b.pickup_note)||has(b.dropoff_note)||has(b.custom_note)) ? `
+      <div class="card" style="margin-top:12px">
+        <h3>📍 Route & notes</h3>
+        <table>
+          ${row('Pickup', has(b.pickup_address)?esc(b.pickup_address):null)}
+          ${row('Drop-off', has(b.dropoff_address)?esc(b.dropoff_address):null)}
+          ${row('Distance', has(b.distance_km)?(n(b.distance_km).toFixed(2)+' km'):null)}
+          ${row('Pickup note', has(b.pickup_note)?esc(b.pickup_note):null)}
+          ${row('Drop-off note', has(b.dropoff_note)?esc(b.dropoff_note):null)}
+          ${row('Customer note', has(b.custom_note)?esc(b.custom_note):null)}
+        </table>
+      </div>` : '';
+
+    const parcelCard = has(b.parcel_item) ? `
+      <div class="card" style="margin-top:12px">
+        <h3>📦 Parcel details</h3>
+        <table>
+          ${row('Item', esc(b.parcel_item))}
+          ${row('Recipient', has(b.recipient_name)?esc(b.recipient_name):null)}
+          ${row('Recipient mobile', has(b.recipient_mobile)?esc(b.recipient_mobile):null)}
+        </table>
+      </div>` : '';
+
+    body.innerHTML = `
+      <button class="btn" onclick="renderBookings()">← Back to bookings</button>
+      <div class="card" style="margin-top:12px">
+        <h3>${esc(b.service_type||'booking')} · <span class="tag ${b.status==='completed'?'tag-on':b.status==='cancelled'?'tag-off':'tag-busy'}">${esc(b.status||'')}</span></h3>
+        <table>
+          ${row('Booked', dt(b.created_at))}
+          ${row('Completed', dt(b.completed_at))}
+          ${row('Customer', esc(b.customer_name||'—')+(has(b.customer_mobile)?' · '+esc(b.customer_mobile):''))}
+          ${row('Driver', has(b.driver_name)?esc(b.driver_name)+(has(b.driver_mobile)?' · '+esc(b.driver_mobile):''):'No driver assigned')}
+          ${row('Merchant / store', has(b.merchant_name)?esc(b.merchant_name):(has(b.unlisted_store)?esc(b.unlisted_store):null))}
+          ${row('Payment', has(b.payment_method)?esc(String(b.payment_method)).toUpperCase():null)}
+          ${row('Passengers', has(b.passenger_count)?esc(String(b.passenger_count)):null)}
+          ${b.fraud_flag?row('⚠️ Fraud flag', esc(String(b.fraud_flag))):''}
+        </table>
+      </div>
+      ${notesCard}
+      ${parcelCard}
+      ${productsCard}
+      <div class="card" style="margin-top:12px">
+        <h3>💰 Fare breakdown</h3>
+        <table>
+          ${row('Products total', has(b.products_total)?peso(b.products_total):(items.length?peso(itemsTotal):null))}
+          ${row('Base fare', has(b.base_fare)?peso(b.base_fare):null)}
+          ${row('Delivery fee', has(b.delivery_fee)?peso(b.delivery_fee):null)}
+          ${row('Pickup distance fare', has(b.pickup_distance_fare)?peso(b.pickup_distance_fare):null)}
+          ${row('Booking fee', has(b.booking_fee)?peso(b.booking_fee):null)}
+          ${row('Discount', has(b.discount_amount)?('- '+peso(b.discount_amount)):null)}
+          ${row('Promo discount', has(b.promo_discount)?('- '+peso(b.promo_discount)):null)}
+          ${row('Estimated fare', has(b.estimated_fare)?peso(b.estimated_fare):null)}
+          ${row('FINAL FARE', has(b.final_fare)?peso(b.final_fare):null, true)}
+        </table>
+        <div class="note">Blank rows mean that charge does not apply to this service.</div>
+      </div>`;
+  }catch(e){ body.innerHTML='<button class="btn" onclick="renderBookings()">← Back</button><div class="empty">Could not load this booking.</div>'; }
 }
 </script>
 
