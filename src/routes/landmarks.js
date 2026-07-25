@@ -48,6 +48,31 @@ router.get('/search', async (req, res) => {
         params));
     }
 
+    // Also surface MERCHANT pins (approved businesses that have a location) so partner
+    // stores are searchable in ride destinations AND the custom "where to buy" picker.
+    try {
+      let mrows;
+      if (q.length === 0) {
+        ({ rows: mrows } = await query(
+          `SELECT id, name, 'merchant' AS category, lat, lng, address AS address_hint
+             FROM businesses
+            WHERE merchant_status='approved' AND COALESCE(is_active,TRUE)=TRUE
+              AND lat IS NOT NULL AND lng IS NOT NULL
+            ORDER BY name LIMIT 15`));
+      } else {
+        const mwords = q.toLowerCase().split(/\s+/).filter(Boolean);
+        const mconds = mwords.map((_, i) => `LOWER(name) LIKE $${i + 1}`).join(' AND ');
+        const mparams = mwords.map(w => `%${w}%`);
+        ({ rows: mrows } = await query(
+          `SELECT id, name, 'merchant' AS category, lat, lng, address AS address_hint
+             FROM businesses
+            WHERE merchant_status='approved' AND COALESCE(is_active,TRUE)=TRUE
+              AND lat IS NOT NULL AND lng IS NOT NULL AND (${mconds})
+            ORDER BY name LIMIT 15`, mparams));
+      }
+      rows = [...(mrows || []), ...rows];   // merchants first
+    } catch (e) { console.error('[landmarks/search] merchant merge skipped:', e.message); }
+
     // Zone-scope as a SOFT preference, not a hard filter: landmarks inside the
     // customer's zone sort first, but we NEVER drop a matching place. Wrapped in
     // its own try/catch so a zone lookup error can never blank the results —
