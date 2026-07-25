@@ -888,6 +888,7 @@ async function renderBookings(){
   setContent(`<div class="toolbar">
       <span class="subtab ${bookingsSub==='all'?'active':''}" onclick="bookingsSub='all';renderBookings()">📋 All bookings</span>
       <span class="subtab ${bookingsSub==='missed'?'active':''}" onclick="bookingsSub='missed';renderBookings()">❌ Missed / no-driver</span>
+      <button class="btn btn-green" style="margin-left:auto" onclick="openManualBooking()">➕ Log Facebook order</button>
     </div><div id="bk-body"><div class="loading">Loading…</div></div>`);
   const body=document.getElementById('bk-body');
   try{
@@ -1013,6 +1014,76 @@ async function openBooking(id){
         <div class="note">Blank rows mean that charge does not apply to this service.</div>
       </div>`;
   }catch(e){ body.innerHTML='<button class="btn" onclick="renderBookings()">← Back</button><div class="empty">Could not load this booking.</div>'; }
+}
+
+// ── Log a Facebook / off-app completed order ──
+let mbOpts = { merchants: [], drivers: [] };
+async function openManualBooking(){
+  const body=document.getElementById('bk-body'); if(!body) return;
+  body.innerHTML='<div class="loading">Loading…</div>';
+  try{ mbOpts = await get('/admin/manual-booking-options'); }catch(e){ mbOpts={merchants:[],drivers:[]}; }
+  const mOpts=(mbOpts.merchants||[]).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('');
+  const dOpts=(mbOpts.drivers||[]).map(d=>`<option value="${d.id}">${esc(d.name)} (wallet ₱${Math.round(d.wallet_balance||0)})</option>`).join('');
+  body.innerHTML=`
+    <button class="btn" onclick="renderBookings()">← Back to bookings</button>
+    <div class="card" style="margin-top:12px;max-width:560px">
+      <h3>➕ Log a Facebook / off-app order</h3>
+      <div class="note">Creates a COMPLETED booking, deducts the driver commission, adds the merchant fee (listed only), counts the trip toward the milestone, and notifies the driver.</div>
+      <label>Customer name</label><input id="mb-cname" placeholder="e.g. Juan Dela Cruz">
+      <label>Customer mobile</label><input id="mb-cmobile" placeholder="09XXXXXXXXX">
+      <label>Service</label><select id="mb-service"><option value="food">food</option><option value="delivery">delivery</option><option value="custom">custom</option><option value="ride">ride</option></select>
+      <label>Merchant (listed only — blank if non-partner)</label><select id="mb-merchant"><option value="">— none / non-partner —</option>${mOpts}</select>
+      <label>Driver</label><select id="mb-driver"><option value="">— choose driver —</option>${dOpts}</select>
+      <label>Product value (₱)</label><input id="mb-prod" type="number" value="0">
+      <label>Delivery fee (₱)</label><input id="mb-delfee" type="number" value="0">
+      <label>Merchant fee</label>
+      <div style="display:flex;gap:8px">
+        <select id="mb-feetype" style="flex:1"><option value="percent">percent of product</option><option value="flat">flat peso</option></select>
+        <input id="mb-feeval" type="number" value="5" style="flex:1">
+      </div>
+      <label>Drop-off (optional)</label><input id="mb-drop" placeholder="delivery address / landmark">
+      <label>Payment</label><select id="mb-pay"><option value="cash">cash</option><option value="wallet">wallet</option><option value="gcash">gcash</option></select>
+      <button class="btn btn-green" style="margin-top:14px" onclick="previewManualBooking()">Preview money moves →</button>
+      <div id="mb-preview"></div>
+    </div>`;
+}
+function mbPayload(confirm){
+  return {
+    customer_name: document.getElementById('mb-cname').value.trim(),
+    customer_mobile: document.getElementById('mb-cmobile').value.trim(),
+    service_type: document.getElementById('mb-service').value,
+    merchant_id: document.getElementById('mb-merchant').value || null,
+    driver_id: document.getElementById('mb-driver').value || null,
+    product_value: document.getElementById('mb-prod').value || 0,
+    delivery_fee: document.getElementById('mb-delfee').value || 0,
+    merchant_fee_type: document.getElementById('mb-feetype').value,
+    merchant_fee_value: document.getElementById('mb-feeval').value || 0,
+    dropoff_address: document.getElementById('mb-drop').value.trim() || null,
+    payment_method: document.getElementById('mb-pay').value,
+    confirm: confirm,
+  };
+}
+async function previewManualBooking(){
+  const el=document.getElementById('mb-preview'); el.innerHTML='<div class="loading">Checking…</div>';
+  try{
+    const r=await post('/admin/manual-booking', mbPayload(false));
+    const warn=r.wallet_goes_negative ? `<div class="note" style="color:var(--amber)">⚠️ This puts ${esc(r.driver_name)} wallet NEGATIVE (₱${r.wallet_after}). You can still log it.</div>` : '';
+    el.innerHTML=`<div class="card" style="margin-top:12px;background:#F6FBF8"><b>Preview</b>
+      <table>
+        <tr><td>Driver commission (from ${esc(r.driver_name)})</td><td style="text-align:right">− ${peso(r.commission)}</td></tr>
+        <tr><td>Driver wallet after</td><td style="text-align:right">${peso(r.wallet_after)}</td></tr>
+        ${r.merchant_name?`<tr><td>Merchant owed (${esc(r.merchant_name)})</td><td style="text-align:right">+ ${peso(r.merchant_fee)}</td></tr>`:'<tr><td>Merchant fee</td><td style="text-align:right">none</td></tr>'}
+      </table>${warn}
+      <button class="btn btn-green" style="margin-top:10px" onclick="commitManualBooking()">✓ Confirm & log this order</button></div>`;
+  }catch(e){ el.innerHTML='<div class="note" style="color:#c0392b">'+esc(e.message||'Could not preview')+'</div>'; }
+}
+async function commitManualBooking(){
+  const el=document.getElementById('mb-preview');
+  try{
+    const r=await post('/admin/manual-booking', mbPayload(true));
+    el.innerHTML=`<div class="card" style="margin-top:12px;background:#EAF7F1"><b>✓ Logged.</b> − ${peso(r.commission)} from ${esc(r.driver_name)}${r.merchant_name?`; ${esc(r.merchant_name)} owes + ${peso(r.merchant_fee)}`:''}. Trip counted + driver notified.</div>
+      <button class="btn btn-green" style="margin-top:10px" onclick="openManualBooking()">Log another</button>`;
+  }catch(e){ el.innerHTML='<div class="note" style="color:#c0392b">'+esc(e.message||'Could not log')+'</div>'; }
 }
 </script>
 

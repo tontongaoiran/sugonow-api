@@ -6,6 +6,9 @@ const express = require('express');
 const { query, withTransaction }    = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { sendSms }                   = require('../services/smsService');
+const G = require('../services/growthService');
+const { sendPush } = require('../services/pushNotificationService');
+const { splitFare, getCommissionRate } = require('../services/fareService');
 
 const router = express.Router();
 router.use(authenticate, requireRole('admin'));
@@ -173,7 +176,7 @@ router.get('/bookings', async (req, res) => {
               b.estimated_fare, b.final_fare, b.pickup_address,
               b.dropoff_address, b.passenger_count, b.discount_amount,
               b.fraud_flag, b.created_at, b.completed_at, b.unlisted_store,
-              uc.full_name AS customer_name,
+              COALESCE(uc.full_name, b.manual_customer_name) AS customer_name,
               ud.full_name AS driver_name,
               (SELECT bz.name FROM order_items oi
                  JOIN menu_items mi ON mi.id = oi.product_id
@@ -181,7 +184,7 @@ router.get('/bookings', async (req, res) => {
                 WHERE oi.booking_id = b.id AND bz.owner_id IS NOT NULL
                 LIMIT 1) AS merchant_name
        FROM bookings b
-       JOIN users uc ON uc.id = b.customer_id
+       LEFT JOIN users uc ON uc.id = b.customer_id
        LEFT JOIN users ud ON ud.id = b.driver_id
        WHERE ($1::text IS NULL OR b.status = $1)
        ORDER BY b.created_at DESC LIMIT $2`,
@@ -201,7 +204,7 @@ router.get('/bookings/:id', async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT b.*,
-              uc.full_name AS customer_name, uc.mobile AS customer_mobile,
+              COALESCE(uc.full_name, b.manual_customer_name) AS customer_name, COALESCE(uc.mobile, b.manual_customer_mobile) AS customer_mobile,
               ud.full_name AS driver_name,   ud.mobile AS driver_mobile,
               (SELECT bz.name FROM order_items oi
                  JOIN menu_items mi ON mi.id = oi.product_id
@@ -209,7 +212,7 @@ router.get('/bookings/:id', async (req, res) => {
                 WHERE oi.booking_id = b.id AND bz.owner_id IS NOT NULL
                 LIMIT 1) AS merchant_name
          FROM bookings b
-         JOIN users uc ON uc.id = b.customer_id
+         LEFT JOIN users uc ON uc.id = b.customer_id
          LEFT JOIN users ud ON ud.id = b.driver_id
         WHERE b.id = $1`, [req.params.id]);
     if (!rows[0]) return res.status(404).json({ success: false, message: 'Booking not found.' });
@@ -224,6 +227,120 @@ router.get('/bookings/:id', async (req, res) => {
   }
 });
 
+// ─── GET /admin/manual-booking-options — merchants + drivers for the form ────
+router.get('/manual-booking-options', async (req, res) => {
+  try {
+    const { rows: merchants } = await query(
+      `SELECT id, name FROM businesses
+        WHERE merchant_status='approved' AND COALESCE(is_active,TRUE)=TRUE
+        ORDER BY name`);
+    const { rows: drivers } = await query(
+      `SELECT dp.user_id AS id, u.full_name AS name, dp.wallet_balance
+         FROM driver_profiles dp JOIN users u ON u.id=dp.user_id
+        WHERE dp.status='verified' ORDER BY u.full_name`);
+    res.json({ success: true, merchants, drivers });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ─── POST /admin/manual-booking — log a completed Facebook/off-app order ──────
+// Reuses the SAME money logic as a real completion: deducts the driver's delivery
+// commission from their wallet, adds a merchant fee to the merchant's collectible
+// (listed merchants only, flat OR percent), counts the trip toward the milestone,
+// and notifies the driver. Pass confirm=false first to PREVIEW the money moves.
+router.post('/manual-booking', async (req, res) => {
+  try {
+    const {
+      customer_name, customer_mobile, service_type = 'delivery',
+      merchant_id = null, driver_id, product_value = 0, delivery_fee = 0,
+      dropoff_address = null, payment_method = 'cash',
+      merchant_fee_type = 'percent', merchant_fee_value = 0, confirm = false,
+    } = req.body;
+
+    if (!driver_id) return res.status(400).json({ success: false, message: 'Choose the driver.' });
+    if (!customer_name || !customer_mobile)
+      return res.status(400).json({ success: false, message: 'Enter the customer name and mobile.' });
+    const delFee  = parseFloat(delivery_fee)  || 0;
+    const prodVal = parseFloat(product_value) || 0;
+    if (delFee <= 0) return res.status(400).json({ success: false, message: 'Enter a delivery fee greater than 0.' });
+
+    // Driver commission on the delivery fee (SAME split as a real completion).
+    const commRate = (await getCommissionRate()) / 100;
+    const commission = Math.round(splitFare(delFee, commRate).commission_amount * 100) / 100;
+
+    // Merchant fee (LISTED merchants only): flat peso OR percent of product value.
+    let merchantFee = 0, merchantName = null;
+    if (merchant_id) {
+      const feeVal = parseFloat(merchant_fee_value) || 0;
+      merchantFee = merchant_fee_type === 'flat'
+        ? feeVal
+        : Math.round((prodVal * feeVal / 100) * 100) / 100;
+      const { rows: mr } = await query(`SELECT name FROM businesses WHERE id=$1`, [merchant_id]);
+      merchantName = mr[0]?.name || null;
+    }
+
+    const { rows: drv } = await query(
+      `SELECT u.full_name, dp.wallet_balance
+         FROM driver_profiles dp JOIN users u ON u.id=dp.user_id WHERE dp.user_id=$1`, [driver_id]);
+    if (!drv[0]) return res.status(404).json({ success: false, message: 'Driver not found.' });
+    const driverName = drv[0].full_name;
+    const walletAfter = Math.round((parseFloat(drv[0].wallet_balance || 0) - commission) * 100) / 100;
+
+    // PREVIEW — show the money moves, commit nothing.
+    if (!confirm) {
+      return res.json({
+        success: true, preview: true,
+        driver_name: driverName, commission, wallet_after: walletAfter,
+        merchant_name: merchantName, merchant_fee: merchantFee,
+        wallet_goes_negative: walletAfter < 0,
+      });
+    }
+
+    // COMMIT — create the completed booking, then move the money.
+    // Provide a zone and a pickup coord (town origin) so no NOT-NULL column blocks it.
+    const finalFare = delFee + prodVal;
+    const { rows: zr } = await query(
+      `SELECT id FROM zones ORDER BY (slug='flora') DESC NULLS LAST LIMIT 1`);
+    const zoneId = zr[0]?.id || null;
+    const { rows: origin } = await query(
+      `SELECT
+         (SELECT NULLIF(value,'')::numeric FROM app_settings WHERE key='delivery_origin_lat' LIMIT 1) AS lat,
+         (SELECT NULLIF(value,'')::numeric FROM app_settings WHERE key='delivery_origin_lng' LIMIT 1) AS lng`);
+    const oLat = origin[0]?.lat ?? 18.2333;
+    const oLng = origin[0]?.lng ?? 121.4200;
+    const { rows: bk } = await query(
+      `INSERT INTO bookings
+         (customer_id, zone_id, driver_id, service_type, status,
+          pickup_lat, pickup_lng, pickup_address,
+          dropoff_address, final_fare, estimated_fare,
+          delivery_fee, payment_method, source,
+          manual_customer_name, manual_customer_mobile, created_at, completed_at)
+       VALUES (NULL,$1,$2,$3,'completed',$4,$5,'Facebook order',$6,$7,$7,$8,$9,'facebook',$10,$11,NOW(),NOW())
+       RETURNING id`,
+      [zoneId, driver_id, service_type, oLat, oLng, dropoff_address, finalFare,
+       delFee, payment_method, customer_name, customer_mobile]);
+    const bookingId = bk[0].id;
+
+    if (commission > 0) await G.deductCommission(driver_id, commission, bookingId);
+    if (merchant_id && merchantFee > 0)
+      await query(`UPDATE businesses SET fee_owed = COALESCE(fee_owed,0) + $1 WHERE id=$2`,
+        [merchantFee, merchant_id]);
+    await query(`UPDATE driver_profiles SET total_trips = total_trips + 1 WHERE user_id=$1`, [driver_id]);
+    try { await G.bumpMilestone(driver_id); } catch (e) { /* milestone table sync is non-critical */ }
+
+    sendPush(driver_id, '✅ A trip was logged for you',
+      `SugoNow recorded a completed order for you (Facebook). +1 trip toward your weekly incentive!`,
+      { type: 'manual_trip' }).catch(() => {});
+
+    res.json({
+      success: true, booking_id: bookingId,
+      commission, merchant_fee: merchantFee, merchant_name: merchantName, driver_name: driverName,
+    });
+  } catch (err) {
+    console.error('manual-booking error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ─── GET /admin/missed-bookings — cancelled bookings, with a reason ──────────
 // Powers the web admin "Missed / no-driver" subtab. Classifies each cancelled
 // booking: cancelled after a driver accepted, no driver ever found (dispatch
@@ -233,14 +350,14 @@ router.get('/missed-bookings', async (req, res) => {
     const { rows } = await query(
       `SELECT b.id, b.service_type, b.status, b.estimated_fare, b.final_fare,
               b.created_at, b.driver_id,
-              uc.full_name AS customer_name, uc.mobile AS customer_mobile,
+              COALESCE(uc.full_name, b.manual_customer_name) AS customer_name, COALESCE(uc.mobile, b.manual_customer_mobile) AS customer_mobile,
               CASE
                 WHEN b.driver_id IS NOT NULL THEN 'cancelled_after_assign'
                 WHEN COALESCE(b.dispatch_exhausted, FALSE) THEN 'no_driver'
                 ELSE 'cancelled_before_dispatch'
               END AS miss_reason
        FROM bookings b
-       JOIN users uc ON uc.id = b.customer_id
+       LEFT JOIN users uc ON uc.id = b.customer_id
        WHERE b.status = 'cancelled'
        ORDER BY b.created_at DESC
        LIMIT 100`);
