@@ -193,7 +193,14 @@ const calculateFare = async ({
     // is Flora town. Bill from the admin-set delivery ORIGIN (default Flora poblacion
     // center) to the drop-off, so far-flung barangays pay for the distance covered.
     // Rides and food keep their real pickup (merchant/customer location).
-    const townOrigin = ['water', 'exchange', 'lpg', 'custom'].includes(serviceType);
+    // Water and LPG have no real customer pickup — bill from the admin-set town
+    // ORIGIN. Custom errands now bill from the customer's pinned "where to buy" store
+    // pickup (so a far pickup like Ronquillo's is paid for). During app rollout, a
+    // custom order that arrives WITHOUT a pickup falls back to the town origin, so
+    // older app versions can never misprice.
+    const townOriginServices = ['water', 'exchange', 'lpg'];
+    const customNeedsFallback = serviceType === 'custom' && (pickupLat == null || pickupLng == null);
+    const townOrigin = townOriginServices.includes(serviceType) || customNeedsFallback;
     const startLat = townOrigin ? fc.originLat : pickupLat;
     const startLng = townOrigin ? fc.originLng : pickupLng;
     tripDistKm = await roadDistanceKm(
