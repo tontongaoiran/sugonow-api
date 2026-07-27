@@ -266,7 +266,11 @@ async function getDriverStats(driverId) {
   const { rows: crRows } = await query(
     `SELECT COALESCE(NULLIF(value,'')::numeric, 0) AS rate
        FROM app_settings WHERE key='commission_rate' LIMIT 1`);
-  const commissionRate = crRows.length ? parseFloat(crRows[0].rate) : 0;
+  // commission_rate is stored as a PERCENT (e.g. '15' = 15%). Convert to a fraction
+  // for (1 - rate), and clamp to 0..1 so a mis-set value can never make net negative.
+  const commissionRate = crRows.length
+    ? Math.min(1, Math.max(0, (parseFloat(crRows[0].rate) || 0) / 100))
+    : 0;
 
   // Fee the driver keeps per booking, before commission (products stripped).
   const feeExpr = `
