@@ -294,7 +294,7 @@ async function getDriverStats(driverId) {
     const { rows } = await query(
       `SELECT COUNT(*)::int AS trips,
               COALESCE(SUM(b.final_fare),0) AS gross,
-              COALESCE(SUM(${feeExpr} * (1 - $2)),0) AS net,
+              COALESCE(SUM(${feeExpr} * (1 - $2::numeric)),0) AS net,
               COUNT(*) FILTER (WHERE b.service_type='ride')::int AS rides,
               COUNT(*) FILTER (WHERE b.service_type IN ('delivery','food','exchange','custom','water'))::int AS deliveries
        FROM bookings b
