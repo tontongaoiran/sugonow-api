@@ -263,15 +263,6 @@ async function getDriverStats(driverId) {
   // LPG/water/ride/custom fares are already fee-only. Commission is then applied
   // at the current rate (0 during the launch promo). `gross` keeps the full
   // amount handled, for reference.
-  const { rows: crRows } = await query(
-    `SELECT COALESCE(NULLIF(value,'')::numeric, 0) AS rate
-       FROM app_settings WHERE key='commission_rate' LIMIT 1`);
-  // commission_rate is stored as a PERCENT (e.g. '15' = 15%). Convert to a fraction
-  // for (1 - rate), and clamp to 0..1 so a mis-set value can never make net negative.
-  const commissionRate = crRows.length
-    ? Math.min(1, Math.max(0, (parseFloat(crRows[0].rate) || 0) / 100))
-    : 0;
-
   // Fee the driver keeps per booking, before commission (products stripped).
   const feeExpr = `
     (CASE
@@ -291,19 +282,34 @@ async function getDriverStats(driverId) {
   };
   const out = {};
   for (const [k, cond] of Object.entries(periods)) {
+    const cond2 = cond.replace(/b\./g, 'b2.');
     const { rows } = await query(
       `SELECT COUNT(*)::int AS trips,
               COALESCE(SUM(b.final_fare),0) AS gross,
-              COALESCE(SUM(${feeExpr} * (1 - $2::numeric)),0) AS net,
+              COALESCE(SUM(${feeExpr}),0) AS fee,
+              COALESCE((
+                SELECT SUM(dwt.amount) FROM driver_wallet_transactions dwt
+                 WHERE dwt.driver_id=$1 AND dwt.type='commission'
+                   AND dwt.booking_id IN (
+                     SELECT b2.id FROM bookings b2
+                      WHERE b2.driver_id=$1 AND b2.status='completed' AND ${cond2}
+                   )
+              ),0) AS commission,
               COUNT(*) FILTER (WHERE b.service_type='ride')::int AS rides,
               COUNT(*) FILTER (WHERE b.service_type IN ('delivery','food','exchange','custom','water'))::int AS deliveries
        FROM bookings b
        WHERE b.driver_id=$1 AND b.status='completed' AND ${cond}`,
-      [driverId, commissionRate]);
+      [driverId]);
+    // net = fee earnings MINUS the commission ACTUALLY charged on those trips (the
+    // 'commission' transactions are negative). Trips completed while commission was
+    // 0% carry no/zero commission, so their net is the full fee — changing the rate
+    // later never rewrites a past trip's take-home.
+    const feeSum  = parseFloat(rows[0].fee) || 0;
+    const commSum = parseFloat(rows[0].commission) || 0;   // negative = deducted
     out[k] = {
       trips: rows[0].trips,
       gross: Math.round(parseFloat(rows[0].gross)),
-      net: Math.round(parseFloat(rows[0].net)),
+      net: Math.round(feeSum + commSum),
       rides: rows[0].rides,
       deliveries: rows[0].deliveries,
     };
