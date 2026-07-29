@@ -154,8 +154,8 @@ router.get('/products/:id', authenticate, async (req, res) => {
       );
       for (const g of gr) {
         const { rows: ch } = await query(
-          `SELECT id, name, price_delta, available
-           FROM option_choices WHERE group_id=$1 AND available=TRUE ORDER BY sort_order`, [g.id]
+          `SELECT id, name, price_delta
+           FROM option_choices WHERE group_id=$1 ORDER BY sort_order`, [g.id]
         );
         groups.push({ ...g, choices: ch });
       }
