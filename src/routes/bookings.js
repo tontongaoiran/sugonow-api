@@ -878,7 +878,7 @@ router.patch('/:id/accept', authenticate, requireVerifiedDriver, async (req, res
 
     const { rows } = await query(
       `UPDATE bookings SET driver_id=$1, status='accepted', updated_at=NOW(),
-              dispatch_exhausted=FALSE
+              accepted_at=NOW(), dispatch_exhausted=FALSE
        WHERE id=$2 AND status='pending' AND driver_id IS NULL
        RETURNING id, customer_id, service_type`,
       [req.user.id, req.params.id]
@@ -1093,7 +1093,7 @@ router.get('/:id/track', authenticate, async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT b.status, b.pickup_lat, b.pickup_lng,
-              b.dropoff_lat, b.dropoff_lng, b.arrived_at,
+              b.dropoff_lat, b.dropoff_lng, b.arrived_at, b.accepted_at,
               b.estimated_fare, b.pickup_distance_fare, b.pickup_distance_km,
               b.dispatch_exhausted, b.eligible_vehicle, b.water_mode, b.lpg_mode,
               b.price_ceiling, b.actual_price, b.price_approval_status, b.price_requested_at,
@@ -1422,6 +1422,7 @@ router.patch('/:id/cancel', authenticate, async (req, res) => {
     // Capture driver + stage BEFORE cancelling (so we can notify the driver)
     const { rows: pre } = await query(
       `SELECT driver_id, status, customer_id, customer_id AS cust,
+              accepted_at,
               COALESCE(wallet_credit_used, 0) AS wallet_credit_used,
               goods_purchased
        FROM bookings
@@ -1430,6 +1431,18 @@ router.patch('/:id/cancel', authenticate, async (req, res) => {
     const driverId = pre[0]?.driver_id || null;
     const cancelledByCustomer = pre[0] && pre[0].customer_id === req.user.id;
     const creditUsed = parseFloat(pre[0]?.wallet_credit_used || 0);
+
+    // Rider protection: once a driver has ACCEPTED, the customer has a 5-minute grace
+    // window to cancel; after that the Cancel is locked (the driver has committed —
+    // driving to pickup / buying goods). Cancelling while still SEARCHING (pending) is
+    // always allowed. accepted_at is null for bookings accepted before this launched,
+    // so those are never wrongly locked (fail-open).
+    if (cancelledByCustomer && pre[0] && pre[0].accepted_at
+        && ['accepted', 'arrived'].includes(pre[0].status)
+        && (Date.now() - new Date(pre[0].accepted_at).getTime()) > 5 * 60 * 1000) {
+      return res.status(409).json({ success: false, window_closed: true,
+        message: 'The 5-minute cancellation window has closed — your driver already accepted and is on the way. Please contact your driver if there is a problem.' });
+    }
 
     // If the driver already bought the goods, the customer can't silently cancel
     // in-app — a fee applies and the driver must report the outcome. Tell them.
