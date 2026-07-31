@@ -976,7 +976,7 @@ router.patch('/:id/accept', authenticate, requireVerifiedDriver, async (req, res
 const DRIVER_CANCEL_REASONS = {
   vehicle_before:     { label: 'vehicle trouble',        outcome: 'redispatch' },
   not_at_pickup:      { label: 'customer not at pickup', outcome: 'redispatch' },
-  not_answering:      { label: 'customer not answering', outcome: 'redispatch' },
+  not_answering:      { label: 'customer not answering', outcome: 'terminal' },
   other:              { label: 'another reason',         outcome: 'redispatch' },
   store_closed:       { label: 'the store is closed',    outcome: 'terminal' },
   customer_cancelled: { label: 'the customer cancelled', outcome: 'terminal' },
@@ -1017,8 +1017,13 @@ router.post('/:id/driver-cancel', authenticate, requireVerifiedDriver, async (re
         `Your driver had to cancel (${meta.label}). We're finding you another driver now — no charge to you.`).catch(() => {});
     } else {
       await query(`UPDATE bookings SET status='cancelled', updated_at=NOW() WHERE id=$1`, [bk.id]);
-      sendPush(bk.customer_id, '❌ Order cancelled',
-        `Sorry — ${meta.label}. You were not charged.${reason === 'store_closed' ? ' Please try again later or pick another store.' : ''}`).catch(() => {});
+      const customerMsg =
+        reason === 'not_answering'
+          ? 'Your driver could not reach you by phone, so the booking was cancelled. You were not charged — please book again when you are ready.'
+        : reason === 'store_closed'
+          ? 'Sorry — the store is closed. You were not charged. Please try again later or pick another store.'
+          : `Sorry — ${meta.label}. You were not charged.`;
+      sendPush(bk.customer_id, '❌ Order cancelled', customerMsg).catch(() => {});
     }
 
     await query(
