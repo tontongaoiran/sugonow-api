@@ -969,6 +969,70 @@ router.patch('/:id/accept', authenticate, requireVerifiedDriver, async (req, res
 });
 
 // ─── PATCH /bookings/:id/decline ─────────────────────────────────────────────
+// ── DRIVER: cancel an accepted booking with a reason (reason drives the outcome) ──
+// Redispatch reasons put the booking back in the queue for another driver. Terminal
+// reasons end it cleanly. No reason charges the customer or the driver's wallet
+// (commission is only deducted at completion, which never happens on a cancel).
+const DRIVER_CANCEL_REASONS = {
+  vehicle_before:     { label: 'vehicle trouble',        outcome: 'redispatch' },
+  not_at_pickup:      { label: 'customer not at pickup', outcome: 'redispatch' },
+  not_answering:      { label: 'customer not answering', outcome: 'redispatch' },
+  other:              { label: 'another reason',         outcome: 'redispatch' },
+  store_closed:       { label: 'the store is closed',    outcome: 'terminal' },
+  customer_cancelled: { label: 'the customer cancelled', outcome: 'terminal' },
+};
+
+router.post('/:id/driver-cancel', authenticate, requireVerifiedDriver, async (req, res) => {
+  try {
+    const reason = String(req.body.reason || '').trim();
+    const note = (req.body.note || '').trim() || null;
+    const meta = DRIVER_CANCEL_REASONS[reason];
+    if (!meta) return res.status(400).json({ success: false, message: 'Please choose a valid reason.' });
+
+    const { rows } = await query(
+      `SELECT id, customer_id, driver_id, status, service_type, zone_id,
+              pickup_lat, pickup_lng, estimated_fare, eligible_vehicle
+         FROM bookings WHERE id=$1`, [req.params.id]);
+    const bk = rows[0];
+    if (!bk) return res.status(404).json({ success: false, message: 'Booking not found.' });
+    if (String(bk.driver_id) !== String(req.user.id))
+      return res.status(403).json({ success: false, message: 'This is not your booking.' });
+    if (!['accepted', 'arrived', 'in_progress', 'waiting'].includes(bk.status))
+      return res.status(400).json({ success: false, message: 'This booking can no longer be cancelled.' });
+
+    if (meta.outcome === 'redispatch') {
+      await query(
+        `UPDATE bookings SET status='pending', driver_id=NULL, accepted_at=NULL,
+                dispatch_exhausted=FALSE, updated_at=NOW()
+          WHERE id=$1`, [bk.id]);
+      await query(
+        `UPDATE dispatch_attempts SET status='expired', responded_at=NOW()
+          WHERE booking_id=$1 AND status IN ('accepted','notified')`, [bk.id]);
+      try {
+        await startDispatch(
+          { id: bk.id, estimated_fare: bk.estimated_fare, eligible_vehicle: bk.eligible_vehicle || 'any' },
+          bk.zone_id, bk.pickup_lat, bk.pickup_lng, bk.service_type);
+      } catch (e) { logError('driverCancelRedispatch', e, { bookingId: bk.id }); }
+      sendPush(bk.customer_id, '🔄 Finding you a new driver',
+        `Your driver had to cancel (${meta.label}). We're finding you another driver now — no charge to you.`).catch(() => {});
+    } else {
+      await query(`UPDATE bookings SET status='cancelled', updated_at=NOW() WHERE id=$1`, [bk.id]);
+      sendPush(bk.customer_id, '❌ Order cancelled',
+        `Sorry — ${meta.label}. You were not charged.${reason === 'store_closed' ? ' Please try again later or pick another store.' : ''}`).catch(() => {});
+    }
+
+    await query(
+      `INSERT INTO driver_cancellations (booking_id, driver_id, reason, note, outcome)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [bk.id, req.user.id, reason, note, meta.outcome]);
+
+    res.json({ success: true, outcome: meta.outcome });
+  } catch (err) {
+    console.error('driver-cancel error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 router.patch('/:id/decline', authenticate, requireVerifiedDriver, async (req, res) => {
   try {
     await query(

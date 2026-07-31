@@ -888,6 +888,7 @@ async function renderBookings(){
   setContent(`<div class="toolbar">
       <span class="subtab ${bookingsSub==='all'?'active':''}" onclick="bookingsSub='all';renderBookings()">📋 All bookings</span>
       <span class="subtab ${bookingsSub==='missed'?'active':''}" onclick="bookingsSub='missed';renderBookings()">❌ Missed / no-driver</span>
+      <span class="subtab ${bookingsSub==='cancels'?'active':''}" onclick="bookingsSub='cancels';renderBookings()">🚫 Driver cancels</span>
       <button class="btn btn-green" style="margin-left:auto" onclick="openManualBooking()">➕ Log Facebook order</button>
     </div><div id="bk-body"><div class="loading">Loading…</div></div>`);
   const body=document.getElementById('bk-body');
@@ -906,6 +907,26 @@ async function renderBookings(){
           <td>${reasonLabel(b.miss_reason)}</td>
           <td>${peso(b.final_fare||b.estimated_fare)}</td>
         </tr>`).join('')+`</table>` : '<div class="empty">No missed bookings 🎉</div>');
+      return;
+    }
+    if(bookingsSub==='cancels'){
+      const r=await get('/admin/driver-cancellations');
+      const rates=r.rates||[], reasons=r.reasons||[], list=r.list||[], flag=r.flag_pct||20;
+      const rl=(k)=>({vehicle_before:'🚗 Vehicle trouble',not_at_pickup:'📍 Not at pickup',not_answering:'📞 Not answering',store_closed:'🏪 Store closed',customer_cancelled:'💸 Customer cancelled',other:'⚠️ Other'}[k]||k);
+      const ratesTbl = rates.length? `<div class="card" style="margin-bottom:12px"><h3>Per-driver cancel rate (flagged over ${flag}%)</h3>
+        <table><tr><th>Driver</th><th>Cancels</th><th>Completed</th><th>Rate</th></tr>`+
+        rates.map(d=>`<tr><td>${esc(d.driver_name||'—')}</td><td>${d.cancels}</td><td>${d.completed}</td>
+          <td>${parseFloat(d.rate)>flag?`<span class="tag tag-off">${d.rate}% ⚠️</span>`:`${d.rate}%`}</td></tr>`).join('')+`</table>
+        <div class="note">Rate = cancels ÷ (cancels + completed) for that driver. Change the flag threshold with the app setting cancel_flag_pct.</div></div>` : '';
+      const reasonsTbl = reasons.length? `<div class="card" style="margin-bottom:12px"><h3>Reasons (last 30 days)</h3>
+        <table><tr><th>Reason</th><th>Count</th></tr>`+
+        reasons.map(x=>`<tr><td>${rl(x.reason)}</td><td>${x.n}</td></tr>`).join('')+`</table></div>` : '';
+      const listTbl = list.length? `<div class="card"><h3>Recent driver cancellations</h3>
+        <table><tr><th>When</th><th>Driver</th><th>Service</th><th>Reason</th><th>Outcome</th></tr>`+
+        list.map(c=>`<tr><td>${c.created_at?new Date(c.created_at).toLocaleString():'—'}</td>
+          <td>${esc(c.driver_name||'—')}</td><td>${esc(c.service_type||'—')}</td><td>${rl(c.reason)}</td>
+          <td><span class="tag ${c.outcome==='redispatch'?'tag-busy':'tag-off'}">${c.outcome==='redispatch'?'↻ redispatched':'ended'}</span></td></tr>`).join('')+`</table></div>` : '<div class="empty">No driver cancellations yet.</div>';
+      body.innerHTML = ratesTbl + reasonsTbl + listTbl;
       return;
     }
     const r = await get('/admin/bookings'); const list = r.bookings||[];

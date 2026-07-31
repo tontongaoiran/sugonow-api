@@ -341,6 +341,48 @@ router.post('/manual-booking', async (req, res) => {
   }
 });
 
+// ─── GET /admin/driver-cancellations — monitor driver cancels ────────────────
+// Recent list + reason breakdown (30d) + per-driver cancel RATE (cancels / trips
+// taken), flagged over the tunable cancel_flag_pct threshold.
+router.get('/driver-cancellations', async (req, res) => {
+  try {
+    const { rows: tr } = await query(
+      `SELECT COALESCE(NULLIF(value,'')::numeric, 20) AS pct
+         FROM app_settings WHERE key='cancel_flag_pct' LIMIT 1`);
+    const flagPct = parseFloat(tr[0]?.pct ?? 20);
+
+    const { rows: list } = await query(
+      `SELECT dc.id, dc.reason, dc.outcome, dc.note, dc.created_at,
+              u.full_name AS driver_name, b.service_type
+         FROM driver_cancellations dc
+         LEFT JOIN users u ON u.id = dc.driver_id
+         LEFT JOIN bookings b ON b.id = dc.booking_id
+        ORDER BY dc.created_at DESC LIMIT 100`);
+
+    const { rows: reasons } = await query(
+      `SELECT reason, COUNT(*)::int AS n
+         FROM driver_cancellations
+        WHERE created_at >= NOW() - INTERVAL '30 days'
+        GROUP BY reason ORDER BY n DESC`);
+
+    // Rate = cancels / (cancels + completed) per driver. Completed bookings keep
+    // their driver_id; cancels are logged — so this is a reliable "of the trips this
+    // driver took, what % did they cancel" figure.
+    const { rows: rates } = await query(
+      `SELECT u.full_name AS driver_name, cc.cancels,
+              COALESCE(cp.completed,0)::int AS completed,
+              ROUND(100.0 * cc.cancels / NULLIF(cc.cancels + COALESCE(cp.completed,0), 0), 1) AS rate
+         FROM (SELECT driver_id, COUNT(*)::int AS cancels FROM driver_cancellations GROUP BY driver_id) cc
+         JOIN users u ON u.id = cc.driver_id
+         LEFT JOIN (SELECT driver_id, COUNT(*)::int AS completed
+                      FROM bookings WHERE status='completed' AND driver_id IS NOT NULL
+                     GROUP BY driver_id) cp ON cp.driver_id = cc.driver_id
+        ORDER BY rate DESC NULLS LAST`);
+
+    res.json({ success: true, flag_pct: flagPct, list, reasons, rates });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ─── GET /admin/missed-bookings — cancelled bookings, with a reason ──────────
 // Powers the web admin "Missed / no-driver" subtab. Classifies each cancelled
 // booking: cancelled after a driver accepted, no driver ever found (dispatch
