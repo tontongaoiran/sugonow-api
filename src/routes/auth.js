@@ -148,14 +148,15 @@ router.post('/check-otp', async (req, res) => {
     let { mobile } = req.body;
     mobile = normalizePhone(mobile) || (mobile || '').trim();
     const cleanOtp = (otp || '').toString().trim();
-    if (TEST_MODE) return res.json({ success: true });
+    if (TEST_MODE) return res.json({ success: true, valid: true });
     const { rows } = await query(
       `SELECT id FROM otp_codes
         WHERE mobile=$1 AND code=$2 AND purpose=$3
           AND is_used=FALSE AND expires_at > NOW()
         ORDER BY created_at DESC LIMIT 1`,
       [mobile.trim(), cleanOtp, purpose]);
-    res.json({ success: !!rows[0] });
+    const ok = !!rows[0];
+    res.json({ success: ok, valid: ok });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
