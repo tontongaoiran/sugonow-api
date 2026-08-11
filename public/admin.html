@@ -397,11 +397,26 @@ async function renderOverview(){
       <div class="stat"><div class="num" style="color:var(--amber)">${peso(cm.merchant?.outstanding)}</div><div class="lbl">Merchant fees still owed${cm.merchant?.outstanding_stores?` (${cm.merchant.outstanding_stores} stores)`:''}</div></div>
     </div>` : '';
   setContent(`<div class="section">🟢 Live right now</div>${live}
+    <div id="today-live"><div class="loading">Loading today…</div></div>
     <div class="section">Today's summary</div>${stats}
     ${comm}
     <div class="section">🛵 Online drivers</div><div id="online-drivers"><div class="loading">Loading…</div></div>`);
   loadOnlineDrivers();
+  loadTodayLive();
   liveTimer = setInterval(async ()=>{ if(CURRENT==='overview'){ try{await refreshLive();}catch(e){} } }, 15000);
+}
+async function loadTodayLive(){
+  try{
+    const r=await get('/admin/today-summary'); const t=r.today||{};
+    const box=document.getElementById('today-live'); if(!box) return;
+    box.innerHTML=`<div class="grid stat-grid">
+      <div class="stat"><div class="num" style="color:var(--green)">${t.completed_trips??0}</div><div class="lbl">Completed trips today</div></div>
+      <div class="stat"><div class="num">${peso(t.gmv)}</div><div class="lbl">Money handled today</div></div>
+      <div class="stat"><div class="num" style="color:var(--amber)">${t.in_progress??0}</div><div class="lbl">In progress now</div></div>
+      <div class="stat"><div class="num">${t.pending??0}</div><div class="lbl">Pending (finding driver)</div></div>
+      <div class="stat"><div class="num" style="color:var(--green)">+${t.new_customers??0}</div><div class="lbl">New customers today</div></div>
+    </div>`;
+  }catch(e){}
 }
 async function refreshLive(){
   const s = await get('/admin/dashboard');
@@ -409,6 +424,7 @@ async function refreshLive(){
   if(nums[0]) nums[0].textContent = s.drivers_online??0;
   if(nums[1]) nums[1].textContent = s.bookings_active??0;
   if(nums[2]) nums[2].textContent = s.bookings_pending??0;
+  loadTodayLive();
   loadOnlineDrivers();
 }
 async function loadOnlineDrivers(){
@@ -710,6 +726,8 @@ async function renderMerchants(){
               ${susp
                 ? `<button class="btn btn-green" onclick="merchantAction('${b.id}','reactivate','Reactivate '+'${jsq(b.name)}'+'?')">Reactivate</button>`
                 : `<button class="btn btn-red" onclick="merchantAction('${b.id}','suspend','Suspend '+'${jsq(b.name)}'+'? Their store will be hidden.')">Suspend</button>`}
+              <button class="btn btn-red" onclick="merchantRemove('${b.id}','${jsq(b.name)}',true)">🗑 Remove</button>
+              <button class="btn btn-green" onclick="merchantRemove('${b.id}','${jsq(b.name)}',false)">♻ Restore</button>
             </td></tr>`;
         }).join('')+`</table>`;
     } else if(merchantSub==='payments'){
@@ -761,6 +779,14 @@ async function changeCategory(id,name){
 async function merchantAction(id,action,confirmMsg){
   if(confirmMsg && !confirm(confirmMsg))return;
   try{ await post('/merchant/admin/'+id+'/'+action,{}); toast('Done'); renderMerchants(); }
+  catch(e){ toast(e.message); }
+}
+async function merchantRemove(id,name,remove){
+  const msg = remove
+    ? 'Remove '+name+'? Their store will be hidden from ALL customer screens (restaurants, stores, LPG/water). Order history is kept and this is reversible with Restore.'
+    : 'Restore '+name+'? Their store will be visible to customers again.';
+  if(!confirm(msg))return;
+  try{ await patch('/admin/merchants/'+id+(remove?'/deactivate':'/reactivate'),{}); toast(remove?'Removed':'Restored'); renderMerchants(); }
   catch(e){ toast(e.message); }
 }
 async function setMerchantFee(id,name){
@@ -964,6 +990,11 @@ async function openBooking(id){
     const n=(v)=> parseFloat(v||0);
 
     const itemsTotal = items.reduce((t,i)=> t + n(i.unit_price)*n(i.quantity), 0);
+    // Delivery fee is often 0 in the column for food orders (the fare bundles products +
+    // delivery into final_fare). Derive it as final_fare − products when products exist.
+    const prodTotalD = has(b.products_total) ? n(b.products_total) : itemsTotal;
+    const derivedDelivery = (prodTotalD > 0 && has(b.final_fare)) ? Math.max(0, n(b.final_fare) - prodTotalD) : null;
+    const shownDelivery = (has(b.delivery_fee) && n(b.delivery_fee) > 0) ? n(b.delivery_fee) : derivedDelivery;
     const productsCard = items.length ? `
       <div class="card" style="margin-top:12px">
         <h3>🛒 Products ordered (${items.length})</h3>
@@ -1024,7 +1055,7 @@ async function openBooking(id){
         <table>
           ${row('Products total', has(b.products_total)?peso(b.products_total):(items.length?peso(itemsTotal):null))}
           ${row('Base fare', has(b.base_fare)?peso(b.base_fare):null)}
-          ${row('Delivery fee', has(b.delivery_fee)?peso(b.delivery_fee):null)}
+          ${row('Delivery fee', shownDelivery != null ? peso(shownDelivery) : null)}
           ${row('Pickup distance fare', has(b.pickup_distance_fare)?peso(b.pickup_distance_fare):null)}
           ${row('Booking fee', has(b.booking_fee)?peso(b.booking_fee):null)}
           ${row('Discount', has(b.discount_amount)?('- '+peso(b.discount_amount)):null)}
@@ -1482,8 +1513,59 @@ async function renderUsers(){
     <div class="toolbar">
       <input id="u-q" placeholder="Search name or mobile…" style="width:260px">
       <button class="btn btn-green" onclick="searchUsers()">Search</button>
-    </div><div id="users-body"><div class="note">Type a name or number and search.</div></div>`);
+    </div><div id="users-body"><div class="note">Type a name or number and search.</div></div>
+    <div class="section" style="margin-top:18px">🆕 Recent customers</div>
+    <div id="recent-customers"><div class="loading">Loading…</div></div>`);
   document.getElementById('u-q').addEventListener('keydown',e=>{if(e.key==='Enter')searchUsers();});
+  loadRecentCustomers();
+}
+async function loadRecentCustomers(){
+  const el=document.getElementById('recent-customers'); if(!el) return;
+  try{
+    const r=await get('/admin/customers');
+    const list=r.customers||[];
+    el.innerHTML = list.length ? `<table><tr><th>Name</th><th>Mobile</th><th>Registered</th><th>Status</th></tr>`+
+      list.map(c=>`<tr style="cursor:pointer" onclick="openCustomer('${c.id}')" title="Click for details">
+        <td><b>${esc(c.full_name||'—')}</b></td><td>${esc(c.mobile||'—')}</td>
+        <td>${c.created_at?new Date(c.created_at).toLocaleString():'—'}</td>
+        <td>${c.is_active===false?'<span class="tag tag-off">inactive</span>':'<span class="tag tag-on">active</span>'}</td></tr>`).join('')+`</table>` : '<div class="empty">No customers yet.</div>';
+  }catch(e){ el.innerHTML='<div class="empty">Could not load customers.</div>'; }
+}
+async function openCustomer(id){
+  const el=document.getElementById('recent-customers'); if(!el) return;
+  el.innerHTML='<div class="loading">Loading…</div>';
+  try{
+    const r=await get('/admin/customers/'+id);
+    const c=r.customer||{}, b=r.bookings||{}, recent=r.recent||[];
+    const dt=(v)=> v?new Date(v).toLocaleString():'—';
+    el.innerHTML=`<button class="btn" onclick="loadRecentCustomers()">← Back to customers</button>
+      <div class="card" style="margin-top:12px;max-width:560px">
+        <h3>${esc(c.full_name||'—')} ${c.is_active===false?'<span class="tag tag-off">inactive</span>':''}</h3>
+        <table>
+          <tr><td style="color:var(--muted)">Mobile</td><td style="text-align:right">${esc(c.mobile||'—')}</td></tr>
+          <tr><td style="color:var(--muted)">Email</td><td style="text-align:right">${esc(c.email||'—')}</td></tr>
+          <tr><td style="color:var(--muted)">Registered</td><td style="text-align:right">${dt(c.created_at)}</td></tr>
+          <tr><td style="color:var(--muted)">Wallet balance</td><td style="text-align:right">${peso(c.wallet_balance)}</td></tr>
+          <tr><td style="color:var(--muted)">Referral code</td><td style="text-align:right">${esc(c.referral_code||'—')}</td></tr>
+          <tr><td style="color:var(--muted)">Bookings (total / completed / cancelled)</td><td style="text-align:right">${b.total||0} / ${b.completed||0} / ${b.cancelled||0}</td></tr>
+        </table>
+        <div class="note">Passwords are stored securely (hashed) and cannot be shown. Use reset instead.</div>
+        <button class="btn btn-green" style="margin-top:6px" onclick="resetCustomerPw('${c.id}')">🔑 Reset password</button>
+        <div id="cust-reset"></div>
+      </div>
+      ${recent.length?`<div class="card" style="margin-top:12px;max-width:560px"><h3>Recent bookings</h3>
+        <table><tr><th>When</th><th>Service</th><th>Status</th><th>Fare</th></tr>`+
+        recent.map(x=>`<tr><td>${dt(x.created_at)}</td><td>${esc(x.service_type||'—')}</td><td>${esc(x.status||'—')}</td><td style="text-align:right">${peso(x.final_fare)}</td></tr>`).join('')+`</table></div>`:''}`;
+  }catch(e){ el.innerHTML='<button class="btn" onclick="loadRecentCustomers()">← Back</button><div class="empty">Could not load this customer.</div>'; }
+}
+async function resetCustomerPw(id){
+  const el=document.getElementById('cust-reset'); if(!el) return;
+  if(!confirm('Reset the password for this customer? They will need the new temporary password to log in.')) return;
+  el.innerHTML='<div class="loading">Resetting…</div>';
+  try{
+    const r=await post('/admin/customers/'+id+'/reset-password',{});
+    el.innerHTML=`<div class="card" style="margin-top:10px;background:#EAF7F1"><b>Temporary password:</b> <span style="font-size:18px;font-weight:800">${esc(r.temp_password)}</span><div class="note">Give this to the customer. Ask them to log in and change it (or use Forgot password).</div></div>`;
+  }catch(e){ el.innerHTML='<div class="note" style="color:#c0392b">'+esc(e.message||'Could not reset')+'</div>'; }
 }
 async function searchUsers(){
   const q=document.getElementById('u-q').value.trim();

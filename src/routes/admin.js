@@ -9,6 +9,7 @@ const { sendSms }                   = require('../services/smsService');
 const G = require('../services/growthService');
 const { sendPush } = require('../services/pushNotificationService');
 const { splitFare, getCommissionRate } = require('../services/fareService');
+const bcrypt = require('bcryptjs');
 
 const router = express.Router();
 router.use(authenticate, requireRole('admin'));
@@ -548,6 +549,80 @@ router.patch('/zones/:slug', async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
+});
+
+// ─── Merchant remove (soft-delete) / reactivate ─────────────────────────────
+// Soft-delete keeps order history intact and hides the store everywhere on the
+// customer side (stores.js filters on is_active + hidden). Reversible.
+router.patch('/merchants/:id/deactivate', async (req, res) => {
+  try {
+    await query(`UPDATE businesses SET is_active=FALSE, hidden=TRUE WHERE id=$1`, [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+router.patch('/merchants/:id/reactivate', async (req, res) => {
+  try {
+    await query(`UPDATE businesses SET is_active=TRUE, hidden=FALSE WHERE id=$1`, [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ─── Customers: list (recent first), detail, reset password ─────────────────
+router.get('/customers', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const params = [];
+    let where = `role='customer'`;
+    if (q) { params.push('%' + q + '%'); where += ` AND (full_name ILIKE $1 OR mobile ILIKE $1)`; }
+    const { rows } = await query(
+      `SELECT id, full_name, mobile, created_at, is_active
+         FROM users WHERE ${where}
+        ORDER BY created_at DESC NULLS LAST LIMIT 300`, params);
+    res.json({ success: true, customers: rows });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+router.get('/customers/:id', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, full_name, mobile, email, created_at, is_active,
+              wallet_balance, referral_code, referred_by
+         FROM users WHERE id=$1 AND role='customer'`, [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ success: false, message: 'Customer not found.' });
+    const { rows: bk } = await query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE status='completed')::int AS completed,
+              COUNT(*) FILTER (WHERE status='cancelled')::int AS cancelled
+         FROM bookings WHERE customer_id=$1`, [req.params.id]);
+    const { rows: recent } = await query(
+      `SELECT service_type, status, final_fare, created_at
+         FROM bookings WHERE customer_id=$1 ORDER BY created_at DESC LIMIT 5`, [req.params.id]);
+    res.json({ success: true, customer: rows[0], bookings: bk[0], recent });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+router.post('/customers/:id/reset-password', async (req, res) => {
+  try {
+    const { rows } = await query(`SELECT id FROM users WHERE id=$1 AND role='customer'`, [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ success: false, message: 'Customer not found.' });
+    const temp = 'Sugo' + Math.floor(1000 + Math.random() * 9000);   // readable temp password
+    const hash = await bcrypt.hash(temp, 12);
+    await query(`UPDATE users SET password_hash=$1 WHERE id=$2`, [hash, req.params.id]);
+    res.json({ success: true, temp_password: temp });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ─── GET /admin/today-summary — live "today" pulse (rides the overview poll) ──
+router.get('/today-summary', async (req, res) => {
+  try {
+    const day = `(NOW() AT TIME ZONE 'Asia/Manila')::date`;
+    const { rows } = await query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM bookings WHERE status='completed' AND completed_at::date = ${day}) AS completed_trips,
+         (SELECT COALESCE(SUM(final_fare),0) FROM bookings WHERE status='completed' AND completed_at::date = ${day}) AS gmv,
+         (SELECT COUNT(*)::int FROM bookings WHERE status='pending') AS pending,
+         (SELECT COUNT(*)::int FROM bookings WHERE status IN ('accepted','arrived','in_progress','waiting')) AS in_progress,
+         (SELECT COUNT(*)::int FROM users WHERE role='customer' AND created_at::date = ${day}) AS new_customers`);
+    res.json({ success: true, today: rows[0] });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 module.exports = router;
