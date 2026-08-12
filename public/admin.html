@@ -1534,6 +1534,7 @@ async function loadRecentCustomers(){
 async function openCustomer(id){
   const el=document.getElementById('recent-customers'); if(!el) return;
   el.innerHTML='<div class="loading">Loading…</div>';
+  el.scrollIntoView({behavior:'smooth', block:'start'});
   try{
     const r=await get('/admin/customers/'+id);
     const c=r.customer||{}, b=r.bookings||{}, recent=r.recent||[];
@@ -1580,7 +1581,9 @@ async function searchUsers(){
         const feeCell = fee>0
           ? `<span class="tag tag-off">₱${Math.round(fee)}</span> <button class="btn btn-green" onclick="clearFee('${u.id}')">Mark paid</button>`
           : '<span class="note">—</span>';
-        return `<tr><td>${esc(u.full_name)}</td><td>${esc(u.mobile)}</td><td>${esc(u.role)}</td>
+        return `<tr><td>${u.role==='customer'
+          ? `<span style="cursor:pointer;color:var(--blue);font-weight:600" onclick="openCustomer('${u.id}')" title="Click for details">${esc(u.full_name)} ›</span>`
+          : esc(u.full_name)}</td><td>${esc(u.mobile)}</td><td>${esc(u.role)}</td>
         <td>${u.banned?'<span class="tag tag-off">Banned</span>':'<span class="tag tag-on">Active</span>'}</td>
         <td>${feeCell}</td>
         <td>${u.banned?`<button class="btn btn-green" onclick="userAction('${u.id}','unban')">Unban</button>`:`<button class="btn btn-amber" onclick="userAction('${u.id}','ban')">Ban</button>`}${u.role==='customer'?` <button class="btn btn-gold" onclick="grantCredit('${u.id}','${jsq(u.full_name)}')">💳 Credit</button>`:''}</td></tr>`;
