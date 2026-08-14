@@ -655,4 +655,37 @@ router.get('/today-summary', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ─── GET /admin/driver-earnings — per-driver monitoring ─────────────────────
+// net = fee-only earnings (food/delivery strip the product cost the driver merely
+// fronted) MINUS the commission actually charged. "handled" is the full money that
+// passed through the driver's hands (includes product cost). Optional ?driver_id.
+router.get('/driver-earnings', async (req, res) => {
+  try {
+    const feeExpr = `
+      (CASE WHEN b.service_type IN ('food','delivery')
+         THEN GREATEST(0, b.final_fare - COALESCE((
+                SELECT SUM(oi.unit_price * oi.quantity) FROM order_items oi
+                 WHERE oi.booking_id = b.id AND (oi.status='ok' OR oi.status IS NULL)),0))
+         ELSE b.final_fare END)`;
+    const { rows } = await query(
+      `SELECT u.full_name AS driver_name, dp.user_id AS driver_id,
+              (SELECT COUNT(*)::int FROM bookings b WHERE b.driver_id=dp.user_id AND b.status='completed') AS trips,
+              (SELECT COALESCE(SUM(b.final_fare),0) FROM bookings b WHERE b.driver_id=dp.user_id AND b.status='completed') AS handled,
+              (SELECT COALESCE(SUM(${feeExpr}),0) FROM bookings b WHERE b.driver_id=dp.user_id AND b.status='completed') AS fee,
+              (SELECT COALESCE(SUM(dwt.amount),0) FROM driver_wallet_transactions dwt
+                 WHERE dwt.driver_id=dp.user_id AND dwt.type='commission') AS commission
+         FROM driver_profiles dp JOIN users u ON u.id=dp.user_id
+        ORDER BY trips DESC`);
+    const drivers = rows.map(r => {
+      const fee = parseFloat(r.fee) || 0, commission = parseFloat(r.commission) || 0;
+      return {
+        driver_id: r.driver_id, driver_name: r.driver_name, trips: r.trips,
+        handled: Math.round(parseFloat(r.handled) || 0),
+        net: Math.round(fee + commission),   // commission is negative
+      };
+    });
+    res.json({ success: true, drivers });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 module.exports = router;

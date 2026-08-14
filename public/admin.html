@@ -530,6 +530,7 @@ async function renderDrivers(){
       <span class="subtab ${driverSub==='apps'?'active':''}" onclick="driverSub='apps';renderDrivers()">📋 Applications</span>
       <span class="subtab ${driverSub==='manage'?'active':''}" onclick="driverSub='manage';renderDrivers()">🛠 Manage</span>
       <span class="subtab ${driverSub==='payouts'?'active':''}" onclick="driverSub='payouts';renderDrivers()">💸 Payouts</span>
+      <span class="subtab ${driverSub==='earnings'?'active':''}" onclick="driverSub='earnings';renderDrivers()">💰 Earnings</span>
     </div><div class="note">Weekly bonuses are in the Growth tab → Bonuses.</div>
     <div id="dr-body"><div class="loading">Loading…</div></div>`);
   const body = document.getElementById('dr-body');
@@ -545,6 +546,14 @@ async function renderDrivers(){
         ${pend.length?`<table><tr><th>Name</th><th>Mobile</th><th>Vehicle</th><th>Docs</th><th>Action</th></tr>${rowsP}</table>`:'<div class="empty">No pending applications.</div>'}
         <div class="section">All drivers (${rest.length})</div>
         ${rest.length?`<table><tr><th>Name</th><th>Mobile</th><th>Vehicle</th><th>Status</th><th>Wallet</th><th>Action</th></tr>${rowsR}</table>`:'<div class="empty">No drivers yet.</div>'}`;
+    } else if(driverSub==='earnings'){
+      const r = await get('/admin/driver-earnings'); const list = r.drivers||[];
+      body.innerHTML = list.length ? `<div class="note">Net income = fees the driver keeps after commission (product cost excluded). Handled = all money that passed through them (includes product cost).</div>
+        <table><tr><th>Driver</th><th>Trips</th><th>Handled</th><th>Net income</th></tr>`+
+        list.map(d=>`<tr>
+          <td><b>${esc(d.driver_name)}</b></td><td>${d.trips}</td>
+          <td>${peso(d.handled)}</td>
+          <td style="font-weight:800;color:var(--green)">${peso(d.net)}</td></tr>`).join('')+`</table>` : '<div class="empty">No driver earnings yet.</div>';
     } else if(driverSub==='manage'){
       const r = await get('/admin-manage/drivers'); const list = r.drivers||[];
       body.innerHTML = list.length ? `<table><tr><th>Name</th><th>Mobile</th><th>Status</th><th>Trips</th><th>Action</th></tr>`+
