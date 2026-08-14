@@ -624,6 +624,22 @@ router.post('/merchants/:id/reset-password', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ─── POST /admin/drivers/:id/reset-password — reset a driver's login ─────────
+// :id is the driver's user id (user_id in driver_profiles).
+router.post('/drivers/:id/reset-password', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT u.id, u.full_name FROM users u
+        WHERE u.id=$1 AND (u.role='driver' OR EXISTS (SELECT 1 FROM driver_profiles dp WHERE dp.user_id=u.id))`,
+      [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ success: false, message: 'Driver not found.' });
+    const temp = 'Sugo' + Math.floor(1000 + Math.random() * 9000);
+    const hash = await bcrypt.hash(temp, 12);
+    await query(`UPDATE users SET password_hash=$1 WHERE id=$2`, [hash, req.params.id]);
+    res.json({ success: true, temp_password: temp, driver_name: rows[0].full_name });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ─── GET /admin/today-summary — live "today" pulse (rides the overview poll) ──
 router.get('/today-summary', async (req, res) => {
   try {

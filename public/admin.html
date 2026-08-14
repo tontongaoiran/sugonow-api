@@ -587,7 +587,15 @@ function driverRow(d, pending){
     <td><span class="tag ${d.status==='verified'||d.status==='approved'?'tag-on':d.status==='pending'?'tag-busy':'tag-off'}">${esc(d.status||'—')}</span></td>
     <td>${peso(d.wallet_balance)}</td>
     <td><button class="btn btn-blue" onclick="driverDetail('${d.user_id||d.id}')">View</button>
-        <button class="btn btn-blue" onclick="driverWallet('${d.user_id||d.id}','${jsq(d.full_name)}')">Wallet</button></td></tr>`;
+        <button class="btn btn-blue" onclick="driverWallet('${d.user_id||d.id}','${jsq(d.full_name)}')">Wallet</button>
+        <button class="btn" onclick="resetDriverPw('${d.user_id||d.id}','${jsq(d.full_name)}')">🔑 Reset password</button></td></tr>`;
+}
+async function resetDriverPw(id,name){
+  if(!confirm('Reset the login password for '+name+'? They will need the new temporary password to log in.'))return;
+  try{
+    const r=await post('/admin/drivers/'+id+'/reset-password',{});
+    alert('Temporary password for '+name+':\n\n'+r.temp_password+'\n\nGive this to the driver. They can change it after logging in.');
+  }catch(e){ toast(e.message||'Could not reset'); }
 }
 async function driverDetail(id){
   setContent('<div class="loading">Loading…</div>');
