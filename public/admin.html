@@ -728,6 +728,7 @@ async function renderMerchants(){
                 : `<button class="btn btn-red" onclick="merchantAction('${b.id}','suspend','Suspend '+'${jsq(b.name)}'+'? Their store will be hidden.')">Suspend</button>`}
               <button class="btn btn-red" onclick="merchantRemove('${b.id}','${jsq(b.name)}',true)">🗑 Remove</button>
               <button class="btn btn-green" onclick="merchantRemove('${b.id}','${jsq(b.name)}',false)">♻ Restore</button>
+              <button class="btn" onclick="resetMerchantPw('${b.id}','${jsq(b.name)}')">🔑 Reset password</button>
             </td></tr>`;
         }).join('')+`</table>`;
     } else if(merchantSub==='payments'){
@@ -788,6 +789,13 @@ async function merchantRemove(id,name,remove){
   if(!confirm(msg))return;
   try{ await patch('/admin/merchants/'+id+(remove?'/deactivate':'/reactivate'),{}); toast(remove?'Removed':'Restored'); renderMerchants(); }
   catch(e){ toast(e.message); }
+}
+async function resetMerchantPw(id,name){
+  if(!confirm('Reset the login password for '+name+'? They will need the new temporary password to log in.'))return;
+  try{
+    const r=await post('/admin/merchants/'+id+'/reset-password',{});
+    alert('Temporary password for '+name+':\n\n'+r.temp_password+'\n\nGive this to the merchant. They can change it after logging in.');
+  }catch(e){ toast(e.message||'Could not reset'); }
 }
 async function setMerchantFee(id,name){
   const type=prompt('Fee type for '+name+'? Type: percent, flat, or none','percent');

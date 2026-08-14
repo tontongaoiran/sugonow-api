@@ -610,6 +610,20 @@ router.post('/customers/:id/reset-password', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ─── POST /admin/merchants/:id/reset-password — reset the merchant OWNER's login ──
+// :id is the business id; we reset the password of its owner_id user.
+router.post('/merchants/:id/reset-password', async (req, res) => {
+  try {
+    const { rows } = await query(`SELECT owner_id, name FROM businesses WHERE id=$1`, [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ success: false, message: 'Merchant not found.' });
+    if (!rows[0].owner_id) return res.status(400).json({ success: false, message: 'This store has no linked owner account to reset.' });
+    const temp = 'Sugo' + Math.floor(1000 + Math.random() * 9000);
+    const hash = await bcrypt.hash(temp, 12);
+    await query(`UPDATE users SET password_hash=$1 WHERE id=$2`, [hash, rows[0].owner_id]);
+    res.json({ success: true, temp_password: temp, merchant_name: rows[0].name });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ─── GET /admin/today-summary — live "today" pulse (rides the overview poll) ──
 router.get('/today-summary', async (req, res) => {
   try {
