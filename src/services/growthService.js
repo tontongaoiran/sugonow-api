@@ -279,6 +279,7 @@ async function getDriverStats(driverId) {
     today: "b.completed_at::date = (NOW() AT TIME ZONE 'Asia/Manila')::date",
     week:  "b.completed_at >= date_trunc('week', NOW() AT TIME ZONE 'Asia/Manila')",
     month: "b.completed_at >= date_trunc('month', NOW() AT TIME ZONE 'Asia/Manila')",
+    all:   "TRUE",
   };
   const out = {};
   for (const [k, cond] of Object.entries(periods)) {
@@ -315,9 +316,12 @@ async function getDriverStats(driverId) {
     };
   }
 
-  // Rating + lifetime trips
+  // Rating + lifetime trips + how many customers rated
   const { rows: dp } = await query(
     `SELECT rating, total_trips FROM driver_profiles WHERE user_id=$1`, [driverId]);
+  const { rows: rc } = await query(
+    `SELECT COUNT(*)::int AS n FROM ratings
+      WHERE driver_id=$1 AND is_report=FALSE AND stars IS NOT NULL`, [driverId]);
 
   // Bonus history: paid + uncollected
   const { rows: bonuses } = await query(
@@ -330,7 +334,11 @@ async function getDriverStats(driverId) {
   return {
     earnings: out,
     rating: dp[0]?.rating ? parseFloat(dp[0].rating) : null,
+    rating_count: rc[0]?.n ?? 0,
     lifetime_trips: dp[0]?.total_trips ?? 0,
+    total_trips: out.all?.trips ?? (dp[0]?.total_trips ?? 0),
+    total_net: out.all?.net ?? 0,
+    total_handled: out.all?.gross ?? 0,
     milestone,
     bonuses,
   };
