@@ -268,6 +268,13 @@ router.post('/manual-booking', async (req, res) => {
     const commRate = (await getCommissionRate()) / 100;
     const commission = Math.round(splitFare(delFee, commRate).commission_amount * 100) / 100;
 
+    // Booking fee — SugoNow's per-order charge (customizable via the booking_fee setting,
+    // default ₱5). The customer pays it; SugoNow collects it from the driver's wallet, the
+    // same as a real booking. Kept in its own column so it never inflates the driver's net.
+    const { rows: bfRows } = await query(
+      `SELECT COALESCE(NULLIF(value,'')::numeric, 5) AS fee FROM app_settings WHERE key='booking_fee' LIMIT 1`);
+    const bookingFee = bfRows.length ? parseFloat(bfRows[0].fee) : 5;
+
     // Merchant fee (LISTED merchants only): flat peso OR percent of product value.
     let merchantFee = 0, merchantName = null;
     if (merchant_id) {
@@ -284,13 +291,13 @@ router.post('/manual-booking', async (req, res) => {
          FROM driver_profiles dp JOIN users u ON u.id=dp.user_id WHERE dp.user_id=$1`, [driver_id]);
     if (!drv[0]) return res.status(404).json({ success: false, message: 'Driver not found.' });
     const driverName = drv[0].full_name;
-    const walletAfter = Math.round((parseFloat(drv[0].wallet_balance || 0) - commission) * 100) / 100;
+    const walletAfter = Math.round((parseFloat(drv[0].wallet_balance || 0) - commission - bookingFee) * 100) / 100;
 
     // PREVIEW — show the money moves, commit nothing.
     if (!confirm) {
       return res.json({
         success: true, preview: true,
-        driver_name: driverName, commission, wallet_after: walletAfter,
+        driver_name: driverName, commission, booking_fee: bookingFee, wallet_after: walletAfter,
         merchant_name: merchantName, merchant_fee: merchantFee,
         wallet_goes_negative: walletAfter < 0,
       });
@@ -313,15 +320,25 @@ router.post('/manual-booking', async (req, res) => {
          (customer_id, zone_id, driver_id, service_type, status,
           pickup_lat, pickup_lng, pickup_address,
           dropoff_address, final_fare, estimated_fare,
-          delivery_fee, payment_method, source,
+          delivery_fee, booking_fee, payment_method, source,
           manual_customer_name, manual_customer_mobile, created_at, completed_at)
-       VALUES (NULL,$1,$2,$3,'completed',$4,$5,'Facebook order',$6,$7,$7,$8,$9,'facebook',$10,$11,NOW(),NOW())
+       VALUES (NULL,$1,$2,$3,'completed',$4,$5,'Facebook order',$6,$7,$7,$8,$9,$10,'facebook',$11,$12,NOW(),NOW())
        RETURNING id`,
       [zoneId, driver_id, service_type, oLat, oLng, dropoff_address, finalFare,
-       delFee, payment_method, customer_name, customer_mobile]);
+       delFee, bookingFee, payment_method, customer_name, customer_mobile]);
     const bookingId = bk[0].id;
 
     if (commission > 0) await G.deductCommission(driver_id, commission, bookingId);
+    // Collect the booking fee from the driver's wallet — its own transaction TYPE so it
+    // is never counted as commission in the driver net-earnings calc.
+    if (bookingFee > 0) {
+      await query(`UPDATE driver_profiles SET wallet_balance = wallet_balance - $1 WHERE user_id=$2`,
+        [bookingFee, driver_id]);
+      await query(
+        `INSERT INTO driver_wallet_transactions (driver_id, amount, type, booking_id, note)
+         VALUES ($1,$2,'booking_fee',$3,'Booking fee on Facebook order')`,
+        [driver_id, -bookingFee, bookingId]);
+    }
     if (merchant_id && merchantFee > 0)
       await query(`UPDATE businesses SET fee_owed = COALESCE(fee_owed,0) + $1 WHERE id=$2`,
         [merchantFee, merchant_id]);
@@ -334,7 +351,7 @@ router.post('/manual-booking', async (req, res) => {
 
     res.json({
       success: true, booking_id: bookingId,
-      commission, merchant_fee: merchantFee, merchant_name: merchantName, driver_name: driverName,
+      commission, booking_fee: bookingFee, merchant_fee: merchantFee, merchant_name: merchantName, driver_name: driverName,
     });
   } catch (err) {
     console.error('manual-booking error:', err.message);

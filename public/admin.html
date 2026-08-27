@@ -1148,6 +1148,7 @@ async function previewManualBooking(){
     el.innerHTML=`<div class="card" style="margin-top:12px;background:#F6FBF8"><b>Preview</b>
       <table>
         <tr><td>Driver commission (from ${esc(r.driver_name)})</td><td style="text-align:right">− ${peso(r.commission)}</td></tr>
+        <tr><td>Booking fee (SugoNow, from ${esc(r.driver_name)})</td><td style="text-align:right">− ${peso(r.booking_fee)}</td></tr>
         <tr><td>Driver wallet after</td><td style="text-align:right">${peso(r.wallet_after)}</td></tr>
         ${r.merchant_name?`<tr><td>Merchant owed (${esc(r.merchant_name)})</td><td style="text-align:right">+ ${peso(r.merchant_fee)}</td></tr>`:'<tr><td>Merchant fee</td><td style="text-align:right">none</td></tr>'}
       </table>${warn}
@@ -1158,7 +1159,7 @@ async function commitManualBooking(){
   const el=document.getElementById('mb-preview');
   try{
     const r=await post('/admin/manual-booking', mbPayload(true));
-    el.innerHTML=`<div class="card" style="margin-top:12px;background:#EAF7F1"><b>✓ Logged.</b> − ${peso(r.commission)} from ${esc(r.driver_name)}${r.merchant_name?`; ${esc(r.merchant_name)} owes + ${peso(r.merchant_fee)}`:''}. Trip counted + driver notified.</div>
+    el.innerHTML=`<div class="card" style="margin-top:12px;background:#EAF7F1"><b>✓ Logged.</b> − ${peso(r.commission)} commission − ${peso(r.booking_fee)} booking fee from ${esc(r.driver_name)}${r.merchant_name?`; ${esc(r.merchant_name)} owes + ${peso(r.merchant_fee)}`:''}. Trip counted + driver notified.</div>
       <button class="btn btn-green" style="margin-top:10px" onclick="openManualBooking()">Log another</button>`;
   }catch(e){ el.innerHTML='<div class="note" style="color:#c0392b">'+esc(e.message||'Could not log')+'</div>'; }
 }
