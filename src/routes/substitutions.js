@@ -30,9 +30,36 @@ async function recomputeBookingTotal(bookingId) {
      WHERE booking_id=$1 AND (status='ok' OR status IS NULL)`, [bookingId]);
   const productsTotal = parseFloat(pt[0]?.products_total || 0);
 
+  // Original products = every ORIGINAL line (substitute_for IS NULL), regardless of its
+  // current status. This is what the delivery fee's product-fee was FIRST based on, and
+  // it's stable — so recomputing from it is idempotent no matter how many substitutions
+  // happen. (Replacement rows carry substitute_for and are counted in productsTotal.)
+  const { rows: op } = await query(
+    `SELECT COALESCE(SUM(unit_price * quantity), 0) AS orig
+     FROM order_items
+     WHERE booking_id=$1 AND substitute_for IS NULL`, [bookingId]);
+  const origProducts = parseFloat(op[0]?.orig || 0);
+
   const { rows: bk } = await query(
-    `SELECT delivery_fee, booking_fee, booking_fee_waived FROM bookings WHERE id=$1`, [bookingId]);
-  const deliveryFee = parseFloat(bk[0]?.delivery_fee || 0);
+    `SELECT delivery_fee, booking_fee, booking_fee_waived, service_type FROM bookings WHERE id=$1`, [bookingId]);
+  const storedDelivery = parseFloat(bk[0]?.delivery_fee || 0);
+
+  // Recompute the delivery fee's PRODUCT-FEE component on the active products, so removing
+  // an item shrinks the fee (and a pricier substitute raises it). Derived from the ORIGINAL
+  // stored delivery_fee + original products, so it stays correct across repeat substitutions.
+  const { rows: cfgRows } = await query(
+    `SELECT key, value FROM app_settings WHERE key IN ('product_fee_pct','product_fee_active','product_fee_cap_custom')`);
+  const cm = Object.fromEntries(cfgRows.map(r => [r.key, r.value]));
+  const productActive = String(cm.product_fee_active ?? 'true') !== 'false';
+  const productPct = parseFloat(cm.product_fee_pct ?? '5');
+  const capCustom = parseFloat(cm.product_fee_cap_custom ?? '50');
+  const isCustom = bk[0]?.service_type === 'custom';
+  const productFee = (x) => {
+    if (!productActive) return 0;
+    const raw = (productPct / 100) * x;
+    return isCustom ? Math.min(raw, capCustom) : raw;
+  };
+  const deliveryFee = Math.max(0, Math.round(storedDelivery - productFee(origProducts) + productFee(productsTotal)));
 
   // estimated_fare bundles products + delivery (booking_fee is tracked separately).
   const newFare = Math.round(productsTotal + deliveryFee);
@@ -40,7 +67,7 @@ async function recomputeBookingTotal(bookingId) {
 
   return {
     products_total: Math.round(productsTotal),
-    delivery_fee:   Math.round(deliveryFee),
+    delivery_fee:   deliveryFee,
     estimated_fare: newFare,
     booking_fee:    parseFloat(bk[0]?.booking_fee || 0),
     booking_fee_waived: !!bk[0]?.booking_fee_waived,

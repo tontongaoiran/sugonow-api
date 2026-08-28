@@ -1014,12 +1014,17 @@ async function openBooking(id){
     const dt=(v)=> v?new Date(v).toLocaleString():null;
     const n=(v)=> parseFloat(v||0);
 
-    const itemsTotal = items.reduce((t,i)=> t + n(i.unit_price)*n(i.quantity), 0);
-    // Delivery fee is often 0 in the column for food orders (the fare bundles products +
-    // delivery into final_fare). Derive it as final_fare − products when products exist.
-    const prodTotalD = has(b.products_total) ? n(b.products_total) : itemsTotal;
+    // Only ACTIVE items (status 'ok' or none) count toward the products total — a
+    // substituted-out / removed / unavailable line is shown struck-through but excluded.
+    const isActive = (i) => !i.status || i.status === 'ok';
+    const itemsTotal = items.filter(isActive).reduce((t,i)=> t + n(i.unit_price)*n(i.quantity), 0);
+    const prodTotalD = itemsTotal;   // always the ACTIVE items total (never a stale stored value)
+    // Delivery fee: derive it as final_fare − ACTIVE products (this reflects the recomputed
+    // fee after any substitution; the stored delivery_fee column can be the pre-sub value).
     const derivedDelivery = (prodTotalD > 0 && has(b.final_fare)) ? Math.max(0, n(b.final_fare) - prodTotalD) : null;
-    const shownDelivery = (has(b.delivery_fee) && n(b.delivery_fee) > 0) ? n(b.delivery_fee) : derivedDelivery;
+    const shownDelivery = derivedDelivery != null
+      ? derivedDelivery
+      : ((has(b.delivery_fee) && n(b.delivery_fee) > 0) ? n(b.delivery_fee) : null);
     const productsCard = items.length ? `
       <div class="card" style="margin-top:12px">
         <h3>🛒 Products ordered (${items.length})</h3>
@@ -1028,7 +1033,7 @@ async function openBooking(id){
           <td><b>${esc(i.product_name||'—')}</b>${i.options_text?'<br><span class="note">'+esc(i.options_text)+'</span>':''}${(i.status&&i.status!=='ok')?' <span class="tag tag-off">'+esc(i.status)+'</span>':''}</td>
           <td style="text-align:center">${esc(String(i.quantity||0))}</td>
           <td style="text-align:right">${peso(i.unit_price)}</td>
-          <td style="text-align:right">${peso(n(i.unit_price)*n(i.quantity))}</td></tr>`).join('')}
+          <td style="text-align:right">${isActive(i)?peso(n(i.unit_price)*n(i.quantity)):'<span style="text-decoration:line-through;color:#aaa">'+peso(n(i.unit_price)*n(i.quantity))+'</span>'}</td></tr>`).join('')}
         <tr><td colspan="3" style="text-align:right;font-weight:800">Products total</td>
             <td style="text-align:right;font-weight:800">${peso(itemsTotal)}</td></tr>
         </table>
@@ -1078,7 +1083,7 @@ async function openBooking(id){
       <div class="card" style="margin-top:12px">
         <h3>💰 Fare breakdown</h3>
         <table>
-          ${row('Products total', has(b.products_total)?peso(b.products_total):(items.length?peso(itemsTotal):null))}
+          ${row('Products total', items.length ? peso(itemsTotal) : null)}
           ${row('Base fare', has(b.base_fare)?peso(b.base_fare):null)}
           ${row('Delivery fee', shownDelivery != null ? peso(shownDelivery) : null)}
           ${row('Pickup distance fare', has(b.pickup_distance_fare)?peso(b.pickup_distance_fare):null)}
