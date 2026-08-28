@@ -281,9 +281,10 @@ router.get('/fare-estimate', async (req, res) => {
       }
     }
 
-    // Booking fee (₱5) — waived for SugoNow Pass members
-    let bookingFee = { fee: 0, waived: false };
-    if (customer_id) bookingFee = await bookingFeeFor(customer_id);
+    // Booking fee (₱5) — waived for SugoNow Pass members. On CUSTOM orders a ₱10 service
+    // fee is folded in (backstop for the missing merchant fee).
+    let bookingFee = { fee: 0, waived: false, booking_fee: 0, custom_service_fee: 0 };
+    if (customer_id) bookingFee = await bookingFeeFor(customer_id, service_type);
 
     // Wallet credit the customer could apply (to fee + fare)
     let walletBalance = 0;
@@ -294,7 +295,8 @@ router.get('/fare-estimate', async (req, res) => {
     res.json({ success: true, ...fare, is_first_booking: firstBooking,
                ride_prices,
                surge_label: surge.active ? surge.label : null, promo,
-               booking_fee: bookingFee.fee,
+               booking_fee: bookingFee.booking_fee ?? bookingFee.fee,
+               custom_service_fee: bookingFee.custom_service_fee ?? 0,
                booking_fee_waived: bookingFee.waived,
                wallet_balance: walletBalance,
                wallet_credit_applicable: creditApplicable,
@@ -602,8 +604,40 @@ router.post('/', authenticate, requireRole('customer'), async (req, res) => {
       }
     } catch (e) { logError('landmarkEnrich', e); }
 
+    // Block custom orders that point at a listed FOOD partner — they must go through Food
+    // (keeps the merchant fee + supports customization). Matches the pinned store by TIGHT
+    // proximity (≤50 m, catches map-tap pins) OR by name (catches searched/typed stores).
+    if (service_type === 'custom') {
+      try {
+        const buyLat = parseFloat(pickup_lat), buyLng = parseFloat(pickup_lng);
+        const buyName = String(pickup_address || unlisted_store || custom_note || '')
+          .toLowerCase().replace(/[^a-z0-9]/g, '');
+        const { rows: fm } = await query(
+          `SELECT name, lat, lng FROM businesses
+            WHERE category IN ('food','bakery') AND is_active=TRUE`);
+        const distM = (aLat, aLng, bLat, bLng) => {
+          const R = 6371000, toRad = (d) => d * Math.PI / 180;
+          const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
+          const h = Math.sin(dLat/2)**2 + Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*Math.sin(dLng/2)**2;
+          return 2 * R * Math.asin(Math.sqrt(h));
+        };
+        const partner = fm.find((m) => {
+          if (!isNaN(buyLat) && !isNaN(buyLng) && m.lat != null && m.lng != null &&
+              distM(buyLat, buyLng, parseFloat(m.lat), parseFloat(m.lng)) <= 50) return true;
+          const mn = String(m.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return mn.length >= 5 && buyName && (mn === buyName || buyName.includes(mn));
+        });
+        if (partner) {
+          return res.status(400).json({
+            success: false, code: 'food_partner', partner_name: partner.name,
+            message: `${partner.name} is a SugoNow Food partner, so it can't be booked as a custom order. Please order from them in Food — you can fully customize your order there.`,
+          });
+        }
+      } catch (e) { logError('customPartnerCheck', e); }
+    }
+
     // Booking fee (₱5) — waived for Pass members
-    const feeInfo = await bookingFeeFor(req.user.id);
+    const feeInfo = await bookingFeeFor(req.user.id, service_type);
 
     const { rows } = await query(
       `INSERT INTO bookings
