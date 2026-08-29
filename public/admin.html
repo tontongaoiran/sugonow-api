@@ -1025,6 +1025,10 @@ async function openBooking(id){
     const shownDelivery = derivedDelivery != null
       ? derivedDelivery
       : ((has(b.delivery_fee) && n(b.delivery_fee) > 0) ? n(b.delivery_fee) : null);
+    // FINAL FARE = the amount the customer actually pays / the driver collects = fare +
+    // booking fee. (final_fare/estimated_fare hold products+delivery; booking_fee is separate.)
+    const fareBase = has(b.final_fare) ? n(b.final_fare) : (has(b.estimated_fare) ? n(b.estimated_fare) : null);
+    const finalToCollect = fareBase != null ? fareBase + (has(b.booking_fee) ? n(b.booking_fee) : 0) : null;
     const productsCard = items.length ? `
       <div class="card" style="margin-top:12px">
         <h3>🛒 Products ordered (${items.length})</h3>
@@ -1091,7 +1095,7 @@ async function openBooking(id){
           ${row('Discount', has(b.discount_amount)?('- '+peso(b.discount_amount)):null)}
           ${row('Promo discount', has(b.promo_discount)?('- '+peso(b.promo_discount)):null)}
           ${row('Estimated fare', has(b.estimated_fare)?peso(b.estimated_fare):null)}
-          ${row('FINAL FARE', has(b.final_fare)?peso(b.final_fare):null, true)}
+          ${row('FINAL FARE', finalToCollect != null ? peso(finalToCollect) : null, true)}
         </table>
         <div class="note">Blank rows mean that charge does not apply to this service.</div>
       </div>`;

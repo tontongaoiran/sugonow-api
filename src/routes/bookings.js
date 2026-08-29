@@ -1198,6 +1198,7 @@ router.get('/:id/track', authenticate, async (req, res) => {
       `SELECT b.status, b.pickup_lat, b.pickup_lng,
               b.dropoff_lat, b.dropoff_lng, b.arrived_at, b.accepted_at,
               b.estimated_fare, b.pickup_distance_fare, b.pickup_distance_km,
+              COALESCE(b.booking_fee,0) AS booking_fee, COALESCE(b.lpg_product_cost,0) AS lpg_product_cost,
               b.dispatch_exhausted, b.eligible_vehicle, b.water_mode, b.lpg_mode,
               b.price_ceiling, b.actual_price, b.price_approval_status, b.price_requested_at,
               b.goods_purchased,
@@ -1218,6 +1219,11 @@ router.get('/:id/track', authenticate, async (req, res) => {
     );
     if (!rows[0]) return res.status(404).json({ success: false, message: 'Booking not found.' });
     const trk = rows[0];
+    // Total the customer pays in cash = fare + LPG product + booking fee − wallet credit.
+    // Same basis the driver collects, so both screens show the identical amount.
+    trk.cash_to_collect = Math.max(0,
+      parseFloat(trk.estimated_fare || 0) + parseFloat(trk.lpg_product_cost || 0)
+      + parseFloat(trk.booking_fee || 0) - parseFloat(trk.wallet_credit_used || 0));
     if (trk.price_approval_status === 'pending' && trk.price_requested_at) {
       const mins = await getApprovalTimeoutMin();
       const elapsed = (Date.now() - new Date(trk.price_requested_at).getTime()) / 1000;

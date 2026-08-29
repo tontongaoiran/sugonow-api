@@ -78,17 +78,19 @@ const getNearestDrivers = async (zoneId, originLat, originLng, limit = 10, eligi
  */
 const notifyDriver = async (booking, driver, serviceLabel) => {
   const secs = await getDispatchTimeoutSec();
+  // Show the FULL amount the driver collects from the customer = fare + booking fee.
+  const total = Math.round(parseFloat(booking.estimated_fare || 0) + parseFloat(booking.booking_fee || 0));
   await query(
     `INSERT INTO dispatch_attempts (booking_id, driver_id, status)
      VALUES ($1, $2, 'notified')`,
     [booking.id, driver.id]
   );
   sendNotificationSms(driver.mobile,
-    `SugoNow: New ${serviceLabel}! ₱${booking.estimated_fare}. ` +
+    `SugoNow: New ${serviceLabel}! ₱${total}. ` +
     `You have ${secs} seconds to accept in the app.`
   ).catch(() => {});
   sendPush(driver.id, `🛺 New ${serviceLabel}!`,
-    `₱${booking.estimated_fare} · ${secs} seconds to accept`,
+    `₱${total} · ${secs} seconds to accept`,
     { type: 'new_booking', bookingId: booking.id }
   ).catch(() => {});
   console.log(`  📨 Notified ${driver.full_name} for booking ${booking.id.slice(0,8)}`);
@@ -145,7 +147,7 @@ const processExpiredDispatches = async () => {
     // there are no still-"notified" attempts outstanding (i.e. the whole current
     // batch has expired — we don't want to pile on while some are still live).
     const { rows: bk } = await query(
-      `SELECT b.id, b.zone_id, b.pickup_lat, b.pickup_lng, b.estimated_fare, b.service_type,
+      `SELECT b.id, b.zone_id, b.pickup_lat, b.pickup_lng, b.estimated_fare, b.booking_fee, b.service_type,
               COALESCE(b.eligible_vehicle, 'any') AS eligible_vehicle,
               (SELECT COUNT(*) FROM dispatch_attempts
                  WHERE booking_id=b.id AND status='notified') AS still_notified
@@ -180,7 +182,7 @@ const processExpiredDispatches = async () => {
       const label = bk[0].service_type === 'delivery' ? 'delivery order' : 'ride';
       for (const d of nextDrivers) {
         await notifyDriver(
-          { id: bk[0].id, estimated_fare: bk[0].estimated_fare },
+          { id: bk[0].id, estimated_fare: bk[0].estimated_fare, booking_fee: bk[0].booking_fee },
           d, label
         );
       }
@@ -219,7 +221,7 @@ const processExpiredDispatches = async () => {
         const { rows: sp } = await query(
           `SELECT 1 FROM bookings WHERE id=$1 AND status='pending' AND driver_id IS NULL`, [bk[0].id]);
         if (!sp[0]) continue;   // already taken — do not re-ping
-        for (const d of freshBatch) await notifyDriver({ id: bk[0].id, estimated_fare: bk[0].estimated_fare }, d, label);
+        for (const d of freshBatch) await notifyDriver({ id: bk[0].id, estimated_fare: bk[0].estimated_fare, booking_fee: bk[0].booking_fee }, d, label);
         await query(`UPDATE bookings SET dispatch_exhausted=FALSE WHERE id=$1`, [bk[0].id]).catch(() => {});
         console.log(`  🔁 Re-pinged ${freshBatch.length} online driver(s) for booking ${bk[0].id.slice(0,8)} (fresh round)`);
       } else {
@@ -246,7 +248,7 @@ const retryExhaustedBookings = async () => {
     ? `AND created_at > NOW() - INTERVAL '${Number(giveUpMin)} minutes'`
     : '';   // 0 = keep trying indefinitely
   const { rows: stuck } = await query(
-    `SELECT id, zone_id, pickup_lat, pickup_lng, estimated_fare, service_type,
+    `SELECT id, zone_id, pickup_lat, pickup_lng, estimated_fare, booking_fee, service_type,
             COALESCE(eligible_vehicle, 'any') AS eligible_vehicle
      FROM bookings
      WHERE status='pending' AND driver_id IS NULL
@@ -277,7 +279,7 @@ const retryExhaustedBookings = async () => {
         `SELECT 1 FROM bookings WHERE id=$1 AND status='pending' AND driver_id IS NULL`, [b.id]);
       if (!sp[0]) continue;   // accepted meanwhile — skip
       for (const d of nextDrivers) {
-        await notifyDriver({ id: b.id, estimated_fare: b.estimated_fare }, d, label);
+        await notifyDriver({ id: b.id, estimated_fare: b.estimated_fare, booking_fee: b.booking_fee }, d, label);
       }
       await query(`UPDATE bookings SET dispatch_exhausted=FALSE WHERE id=$1`, [b.id]);
       console.log(`  🔁 Retried exhausted booking ${b.id.slice(0,8)} (new drivers available)`);
