@@ -584,6 +584,40 @@ router.patch('/merchants/:id/reactivate', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ─── Merchant menu (READ-ONLY) — full menu + options, for sending to customers ──
+// Returns every product (available or not) with its price and option groups/add-ons, so
+// admin can view/print a merchant's menu when logging Facebook orders. No writes.
+router.get('/merchant-menu/:businessId', async (req, res) => {
+  try {
+    const { rows: store } = await query(
+      `SELECT id, name, category, address, delivery_fee FROM businesses WHERE id=$1`,
+      [req.params.businessId]);
+    if (!store[0]) return res.status(404).json({ success: false, message: 'Store not found.' });
+
+    const { rows: products } = await query(
+      `SELECT id, name, description, price, emoji, category, unit, has_options, available
+         FROM menu_items WHERE business_id=$1
+        ORDER BY category NULLS LAST, sort_order, name`, [req.params.businessId]);
+
+    // Attach option groups + choices for products that have them.
+    for (const p of products) {
+      p.option_groups = [];
+      if (p.has_options) {
+        const { rows: gr } = await query(
+          `SELECT id, name, select_type, required FROM option_groups
+            WHERE product_id=$1 ORDER BY sort_order`, [p.id]);
+        for (const g of gr) {
+          const { rows: ch } = await query(
+            `SELECT name, price_delta FROM option_choices WHERE group_id=$1 ORDER BY sort_order`, [g.id]);
+          g.choices = ch;
+        }
+        p.option_groups = gr;
+      }
+    }
+    res.json({ success: true, store: store[0], products });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ─── Customers: list (recent first), detail, reset password ─────────────────
 router.get('/customers', async (req, res) => {
   try {

@@ -147,6 +147,7 @@ const TABS = [
   ['drivers','🛺','Drivers'],
   ['merchants','🏪','Merchants'],
   ['catalog','📦','Stores & Products'],
+  ['menus','🍽','Menus'],
   ['bookings','📋','Bookings'],
   ['issues','🚨','Issues'],
   ['money','💰','Fares & Fees'],
@@ -308,6 +309,7 @@ async function renderTab(tab){
     if(tab==='drivers') return renderDrivers();
     if(tab==='merchants') return renderMerchants();
     if(tab==='catalog') return renderCatalog();
+    if(tab==='menus') return renderMenus();
     if(tab==='bookings') return renderBookings();    if(tab==='issues') return renderIssues();
     if(tab==='money') return renderMoney();
     if(tab==='growth') return renderGrowth();
@@ -710,6 +712,96 @@ async function walletCashout(id,name){
 
 // ====================== MERCHANTS ======================
 let merchantSub='list';
+// ═══════════════ MENUS (read-only, for sending to customers) ═══════════════
+let menuStores = [];
+let menuFilter = '';
+let _lastMenu = null;
+async function renderMenus(){
+  setContent(`
+    <div class="card">
+      <h3>🍽 Merchant menus</h3>
+      <div class="note">Pick a store to see its full menu with prices and add-ons, then print or screenshot it to send to a customer.</div>
+      <input id="menuSearch" placeholder="Search a store by name…" style="width:100%;padding:10px;margin-top:10px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box" oninput="menuFilter=this.value;drawMenuList()" />
+      <div id="menu-list" style="margin-top:12px"><div class="loading">Loading…</div></div>
+    </div>
+    <div id="menu-view"></div>`);
+  try{
+    const r = await get('/merchant/admin/merchants');
+    menuStores = (r.merchants||[]).filter(m=>m.merchant_status==='approved');
+    drawMenuList();
+  }catch(e){ const el=document.getElementById('menu-list'); if(el) el.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
+}
+function drawMenuList(){
+  const el=document.getElementById('menu-list'); if(!el) return;
+  const q=(menuFilter||'').trim().toLowerCase();
+  const list=menuStores.filter(m=>!q||(m.name||'').toLowerCase().includes(q));
+  if(!list.length){ el.innerHTML='<div class="empty">No matching stores.</div>'; return; }
+  el.innerHTML=list.map(m=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #f0f0f0">
+      <div><b>${esc(m.name)}</b>${m.category?' <span class="note">'+esc(m.category)+'</span>':''}</div>
+      <button class="btn btn-blue" onclick="openMenu('${m.id}')">View menu ▶</button>
+    </div>`).join('');
+}
+async function openMenu(id){
+  const view=document.getElementById('menu-view'); if(!view) return;
+  view.innerHTML='<div class="card" style="margin-top:14px"><div class="loading">Loading menu…</div></div>';
+  try{
+    _lastMenu = await get('/admin/merchant-menu/'+id);
+    view.innerHTML=renderMenuCard(_lastMenu);
+    view.scrollIntoView({behavior:'smooth'});
+  }catch(e){ view.innerHTML='<div class="card" style="margin-top:14px"><div class="empty">'+esc(e.message)+'</div></div>'; }
+}
+function menuByCat(r){
+  const byCat={};
+  (r.products||[]).forEach(p=>{ const c=p.category||'Menu'; (byCat[c]=byCat[c]||[]).push(p); });
+  return byCat;
+}
+function optLine(g){
+  return (g.choices||[]).map(ch=>esc(ch.name)+(parseFloat(ch.price_delta)>0?' +'+peso(ch.price_delta):'')).join(', ');
+}
+function renderMenuCard(r){
+  const byCat=menuByCat(r);
+  let html=`<div class="card" style="margin-top:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <h3 style="margin:0">${esc(r.store.name)} — Menu</h3>
+      <button class="btn btn-green" onclick="printMenu()">🖨 Print / Save as image</button>
+    </div>
+    ${(!r.products||!r.products.length)?'<div class="empty">This store has no products yet.</div>':''}`;
+  Object.keys(byCat).forEach(c=>{
+    html+=`<div style="margin-top:14px"><div style="font-weight:800;color:#0F6E56;border-bottom:2px solid #E1F5EE;padding-bottom:4px">${esc(c)}</div>`;
+    byCat[c].forEach(p=>{
+      html+=`<div style="padding:7px 0;border-bottom:1px solid #f5f5f5">
+        <div style="display:flex;justify-content:space-between;gap:10px"><b>${esc(p.name)}</b><b>${peso(p.price)}</b></div>
+        ${p.description?'<div class="note">'+esc(p.description)+'</div>':''}
+        ${!p.available?'<div class="note" style="color:#A32D2D">(currently unavailable)</div>':''}
+        ${(p.option_groups||[]).map(g=>`<div style="margin-left:10px;font-size:13px;color:#555"><i>${esc(g.name)}${g.required?' (required)':''}:</i> ${optLine(g)}</div>`).join('')}
+      </div>`;
+    });
+    html+=`</div>`;
+  });
+  return html+`</div>`;
+}
+function printMenu(){
+  if(!_lastMenu) return;
+  const r=_lastMenu, byCat=menuByCat(r);
+  let body=`<h1>${esc(r.store.name)} — Menu</h1>`;
+  Object.keys(byCat).forEach(c=>{
+    body+=`<h2>${esc(c)}</h2>`;
+    byCat[c].forEach(p=>{
+      body+=`<div class="it"><div class="row"><b>${esc(p.name)}</b><b>${peso(p.price)}</b></div>
+        ${p.description?'<div class="d">'+esc(p.description)+'</div>':''}
+        ${(p.option_groups||[]).map(g=>`<div class="o"><i>${esc(g.name)}:</i> ${optLine(g)}</div>`).join('')}</div>`;
+    });
+  });
+  const w=window.open('','_blank');
+  if(!w){ alert('Please allow pop-ups to print/save the menu.'); return; }
+  w.document.write(`<html><head><title>${esc(r.store.name)} Menu</title>
+    <style>body{font-family:system-ui,Arial,sans-serif;max-width:620px;margin:24px auto;padding:0 18px;color:#1a1a1a}
+    h1{font-size:22px;color:#0F6E56}h2{font-size:16px;color:#0F6E56;border-bottom:2px solid #cceee0;margin-top:20px;padding-bottom:3px}
+    .it{margin:7px 0}.row{display:flex;justify-content:space-between;gap:10px}.d{color:#777;font-size:13px}.o{margin-left:12px;font-size:13px;color:#555}</style>
+    </head><body>${body}<script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script></body></html>`);
+  w.document.close();
+}
+
 async function renderMerchants(){
   setContent(`<div class="subtabs" style="margin-bottom:12px">
       <span class="subtab ${merchantSub==='list'?'active':''}" onclick="merchantSub='list';renderMerchants()">🏪 Merchants</span>
