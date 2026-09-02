@@ -210,6 +210,10 @@ const calculateFare = async ({
       fc.useRoad);
   }
   const billableKm = Math.ceil(tripDistKm - 1e-9);   // round UP to whole km
+  if (stopoverLat && stopoverLng && dropLat && dropLng) {
+    // Confirms the stopover leg is included (A→B→C), not just A→C. Visible in Railway logs.
+    console.log(`[fare] trip WITH stopover A→B→C = ${tripDistKm.toFixed(2)}km (billable ${billableKm}km), service=${serviceType}`);
+  }
 
   // PRICING:
   //  - Rides: base × passengers + distance (charged once)
