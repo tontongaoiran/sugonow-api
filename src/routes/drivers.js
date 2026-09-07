@@ -32,6 +32,54 @@ router.get('/nearby', authenticate, async (req, res) => {
   }
 });
 
+// ─── GET /drivers/trips — the driver's OWN completed trips + money breakdown ──
+// Read-only. Mirrors the web-admin booking detail: products total, delivery/ride
+// fare, booking fee (SugoNow's), SugoNow commission, and the driver's net earning.
+// Facebook (manual) orders are included and flagged.
+router.get('/trips', authenticate, requireRole('driver'), async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT b.id, b.service_type, b.source, b.completed_at, b.created_at,
+              COALESCE(b.final_fare, b.estimated_fare, 0) AS final_fare,
+              COALESCE(b.booking_fee, 0)        AS booking_fee,
+              COALESCE(b.wallet_credit_used, 0) AS wallet_credit_used,
+              COALESCE((SELECT SUM(oi.unit_price * oi.quantity) FROM order_items oi
+                         WHERE oi.booking_id = b.id
+                           AND (oi.status = 'ok' OR oi.status IS NULL)), 0) AS products_total,
+              COALESCE((SELECT -SUM(dwt.amount) FROM driver_wallet_transactions dwt
+                         WHERE dwt.booking_id = b.id AND dwt.type = 'commission'), 0) AS commission
+         FROM bookings b
+        WHERE b.driver_id = $1 AND b.status = 'completed'
+        ORDER BY b.completed_at DESC NULLS LAST, b.created_at DESC
+        LIMIT 60`, [req.user.id]);
+
+    const trips = rows.map(r => {
+      const fare       = parseFloat(r.final_fare) || 0;
+      const products   = parseFloat(r.products_total) || 0;
+      const bookingFee = parseFloat(r.booking_fee) || 0;
+      const commission = parseFloat(r.commission) || 0;
+      const credit     = parseFloat(r.wallet_credit_used) || 0;
+      // fare portion (ride fare, or delivery fee for food/store orders) = final_fare − products
+      const deliveryFee = Math.max(0, Math.round(fare - products));
+      const net         = Math.round(deliveryFee - commission);           // driver keeps this
+      const collected   = Math.max(0, Math.round(fare + bookingFee - credit)); // cash from customer
+      return {
+        id: r.id,
+        service_type: r.service_type,
+        is_facebook: r.source === 'facebook',
+        completed_at: r.completed_at || r.created_at,
+        products_total: Math.round(products),
+        delivery_fee: deliveryFee,
+        booking_fee: Math.round(bookingFee),
+        commission: Math.round(commission),
+        net_earnings: net,
+        total_collected: collected,
+      };
+    });
+    res.json({ success: true, trips });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ─── PATCH /drivers/online-status ─────────────────────────────────────────────
 router.patch('/online-status', authenticate, requireVerifiedDriver, async (req, res) => {
   try {
