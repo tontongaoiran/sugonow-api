@@ -41,6 +41,7 @@ router.get('/trips', authenticate, requireRole('driver'), async (req, res) => {
     const { rows } = await query(
       `SELECT b.id, b.service_type, b.source, b.completed_at, b.created_at,
               COALESCE(b.final_fare, b.estimated_fare, 0) AS final_fare,
+              COALESCE(b.delivery_fee, 0)       AS delivery_fee_col,
               COALESCE(b.booking_fee, 0)        AS booking_fee,
               COALESCE(b.wallet_credit_used, 0) AS wallet_credit_used,
               COALESCE((SELECT SUM(oi.unit_price * oi.quantity) FROM order_items oi
@@ -55,20 +56,37 @@ router.get('/trips', authenticate, requireRole('driver'), async (req, res) => {
 
     const trips = rows.map(r => {
       const fare       = parseFloat(r.final_fare) || 0;
-      const products   = parseFloat(r.products_total) || 0;
+      const products   = parseFloat(r.products_total) || 0;   // from order_items (app orders)
+      const delivCol   = parseFloat(r.delivery_fee_col) || 0; // stored delivery fee
       const bookingFee = parseFloat(r.booking_fee) || 0;
       const commission = parseFloat(r.commission) || 0;
       const credit     = parseFloat(r.wallet_credit_used) || 0;
-      // fare portion (ride fare, or delivery fee for food/store orders) = final_fare − products
-      const deliveryFee = Math.max(0, Math.round(fare - products));
-      const net         = Math.round(deliveryFee - commission);           // driver keeps this
-      const collected   = Math.max(0, Math.round(fare + bookingFee - credit)); // cash from customer
+
+      // Separate products vs delivery fee across all order types:
+      //  - App food/store order  -> products from order_items; delivery = final_fare − products
+      //  - Facebook/manual order -> no order_items; delivery = stored delivery_fee column,
+      //                             products = final_fare − delivery
+      //  - Ride (no products, delivery_fee column 0) -> whole fare is the ride fare
+      let productsShown, deliveryFee;
+      if (products > 0) {
+        productsShown = products;
+        deliveryFee   = Math.max(0, Math.round(fare - products));
+      } else if (delivCol > 0) {
+        deliveryFee   = Math.round(delivCol);
+        productsShown = Math.max(0, Math.round(fare - delivCol));
+      } else {
+        productsShown = 0;
+        deliveryFee   = Math.round(fare);
+      }
+
+      const net       = Math.round(deliveryFee - commission);            // driver keeps this
+      const collected = Math.max(0, Math.round(fare + bookingFee - credit)); // cash from customer
       return {
         id: r.id,
         service_type: r.service_type,
         is_facebook: r.source === 'facebook',
         completed_at: r.completed_at || r.created_at,
-        products_total: Math.round(products),
+        products_total: productsShown,
         delivery_fee: deliveryFee,
         booking_fee: Math.round(bookingFee),
         commission: Math.round(commission),
